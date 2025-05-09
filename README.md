@@ -1,7 +1,7 @@
   
 ![Earthquake Analysis Banner](https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1200&q=80)
 
-# 🌍 **Earthquake Analysis & Prediction** 🌋
+# 🌍 **Análisis y predicción de terremotos** 🌋
 
 ---
 
@@ -71,13 +71,6 @@ Consulta la [Guía de Contribución](CONTRIBUTING.md) para más detalles.
 
 Este proyecto está bajo la licencia **MIT**.  
 Consulta el archivo [LICENSE](LICENSE) para más información.
-
----
-
-## 📬 **Contacto**
-
-¿Dudas o sugerencias?  
-Escríbeme a [tu-email@ejemplo.com](mailto:tu-email@ejemplo.com) o abre un issue en el repositorio.
 
 ---
 
