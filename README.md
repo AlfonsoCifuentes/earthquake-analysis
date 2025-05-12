@@ -1,4 +1,6 @@
-![Earthquake Analysis Banner](QuakeAnalysis.jpg)
+<div align="center">
+  <img src="QuakeAnalysis.jpg" alt="Earthquake Analysis Banner" width="100%" />
+</div>
 
 # 🌍 **Earthquake Analysis and Prediction** 🌋
 
@@ -173,7 +175,7 @@ Consulta el archivo [LICENSE](LICENSE) para más información.
 
 ---
 
-> _“La mejor manera de predecir el futuro es crearlo.”_  
+> “La mejor manera de predecir el futuro es crearlo.” 
 > **— Peter Drucker**
 
 ---
