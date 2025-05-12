@@ -75,7 +75,9 @@ Our interactive Streamlit application allows you to:
 - View predictive models' results in real-time
 - Download analysis reports and findings
 
-![Seismic Data Visualization](https://images.unsplash.com/photo-1464983953574-0892a716854b?auto=format&fit=crop&w=1200&q=80)
+<div align="center">
+  <img src="logoterremoto.jpg" alt="Earthquake Analysis Photo 2" width="100%" />
+</div>
 
 ---
 
