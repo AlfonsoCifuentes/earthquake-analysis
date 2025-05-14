@@ -583,6 +583,69 @@ def plot_magnitude_distribution(df):
     fig.update_layout(bargap=0.1)
     return fig
 
+# Function to create a titled chart with proper legend placement
+def create_titled_chart(fig, title, height=None, use_container_width=True):
+    """
+    Creates a chart with proper title placement to avoid legend overlap
+    """
+    # Remove the original title from the figure
+    fig.update_layout(title=None)
+    
+    # If height is specified, update it
+    if height:
+        fig.update_layout(height=height)
+    
+    # Add proper margin to ensure the plot elements don't crowd each other
+    fig.update_layout(
+        margin=dict(t=10, b=10, l=10, r=10),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        )
+    )
+    
+    # Display the title above the chart using Streamlit's markdown
+    st.markdown(f"<h3 style='text-align: center; color: #ffb347;'>{title}</h3>", unsafe_allow_html=True)
+    
+    # Return the plotly chart
+    return st.plotly_chart(fig, use_container_width=use_container_width)
+
+# For maps and complex charts that might need special handling
+def create_titled_map(fig, title, height=None, use_container_width=True):
+    """
+    Creates a map with proper title placement
+    """
+    # Remove the original title 
+    fig.update_layout(title=None)
+    
+    # If height is specified, update it
+    if height:
+        fig.update_layout(height=height)
+        
+    # Add proper margin and adjust legend position for maps
+    fig.update_layout(
+        margin=dict(t=5, b=5, l=5, r=5),
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=-0.05,
+            xanchor="center",
+            x=0.5,
+            bgcolor="rgba(35, 37, 38, 0.7)",
+            bordercolor="rgba(255, 179, 71, 0.3)",
+            borderwidth=1
+        )
+    )
+    
+    # Display the title above the map using Streamlit's markdown
+    st.markdown(f"<h3 style='text-align: center; color: #ffb347;'>{title}</h3>", unsafe_allow_html=True)
+    
+    # Return the plotly chart
+    return st.plotly_chart(fig, use_container_width=use_container_width)
+
 # Data filters
 def filter_data(df, date_range, mag_range, depth_range, types, regions):
     mask = (
@@ -3023,17 +3086,57 @@ if df is not None and not df.empty:
             
             # Función para reproducir sonido de alerta
             def play_alarm_sound():
-                # Usar HTML y JavaScript para reproducir el sonido
-                sound_file = "alarm.wav"  # Asegúrate de que este archivo esté en la carpeta raíz o proporciona la ruta completa
-                
-                # Código HTML para reproducir sonido
-                sound_html = f"""
-                <audio autoplay>
-                    <source src="{sound_file}" type="audio/wav">
-                    Su navegador no soporta el elemento de audio.
-                </audio>
                 """
-                st.markdown(sound_html, unsafe_allow_html=True)
+                Play an alarm sound using HTML5 audio with proper error handling
+                to prevent WebSocket connection issues.
+                """
+                try:
+                    # Path to the audio file - make sure it exists!
+                    sound_file = "data/alarm.wav"  # Better to store in data folder
+                    
+                    # Create HTML with proper error handling
+                    sound_html = f"""
+                    <script>
+                    // Use try-catch to handle audio errors properly
+                    try {{
+                        const audio = new Audio('{sound_file}');
+                        audio.volume = 0.7;  // 70% volume
+                        
+                        // Handle errors properly
+                        audio.onerror = function(e) {{
+                            console.error('Audio error:', e);
+                        }};
+                        
+                        // Only play if user has interacted with page (browser policy)
+                        if (document.hasFocus()) {{
+                            var playPromise = audio.play();
+                            
+                            // Handle promise rejection (common in some browsers)
+                            if (playPromise !== undefined) {{
+                                playPromise.catch(function(error) {{
+                                    console.error('Play promise error:', error);
+                                }});
+                            }}
+                        }}
+                    }} catch (e) {{
+                        console.error('Audio setup error:', e);
+                    }}
+                    </script>
+                    
+                    <div style="display:none">
+                        <audio id="alert-sound">
+                            <source src="{sound_file}" type="audio/wav">
+                        </audio>
+                    </div>
+                    """
+                    
+                    # Render the HTML/JS safely
+                    st.markdown(sound_html, unsafe_allow_html=True)
+                except Exception as e:
+                    # Log the error but don't crash if sound playing fails
+                    print(f"Error playing alert sound: {e}")
+                    # Avoid displaying errors to users for non-critical feature
+                    pass
             
             # Crear columnas para mostrar diferentes fuentes de alerta
             alert_col1, alert_col2 = st.columns(2)
