@@ -25,7 +25,7 @@ import seaborn as sns
 
 # --- Define translations ---
 T = {
-    "dashboard_title": "🌍 Earthquake analysis and prediction",
+    "dashboard_title": "🌋 Earthquake analysis and prediction",
     "dashboard_desc": "Analyze and visualize global seismic activity data from multiple sources.",
     "filters": "Filters",
     "date_range": "Date Range",
@@ -46,8 +46,8 @@ T = {
 
 # --- Page Configuration --- (must be before any Streamlit UI code)
 st.set_page_config(
-    page_title="🌍 Interactive Seismic Activity Dashboard",  # Use default language
-    page_icon="🌍",
+    page_title="Earthquake analysis and prediction",
+    page_icon="🌋",
     layout="wide"
 )
 
@@ -56,6 +56,7 @@ st.title(T["dashboard_title"])
 st.markdown(T["dashboard_desc"])
 df = None
 
+# --- Custom CSS for styling ---
 st.markdown("""
 <style>
 /* Google Fonts import */
@@ -196,6 +197,8 @@ h1, h2, h3, h4, h5, h6 {
     color: #fff !important;
     background: #b22222 !important;
 }
+
+
 
 .stMarkdown code {
     background: #232526 !important;
@@ -515,6 +518,20 @@ div[class*="border-radius"] h4 {
     z-index: 1000 !important;
 }
             
+/* Cambia el color de fondo de st.info a verde */
+.stAlert[data-testid="stAlertInfo"] {
+    background: #2ecc40 !important;   /* Verde */
+    color: #fff !important;
+    border-left: 0.5rem solid #27ae60 !important;
+}
+
+/* Cambia el color de fondo de st.warning a amarillo */
+.stAlert[data-testid="stAlertWarning"] {
+    background: #ffe066 !important;   /* Amarillo */
+    color: #333 !important;
+    border-left: 0.5rem solid #ffb347 !important;
+}
+            
 </style>
 """, unsafe_allow_html=True)
 
@@ -680,10 +697,11 @@ def sidebar_filters(df, T):
         st.session_state['date_range'] = [min_date, max_date]
         
     date_range = st.sidebar.date_input(
-        "",
+        "Select date range",  # Added label
         value=st.session_state['date_range'],
         min_value=min_date,
-        max_value=max_date
+        max_value=max_date,
+        label_visibility="collapsed"  # Hide visually but keep for accessibility
     )
     
     # Magnitude range filter
@@ -697,12 +715,13 @@ def sidebar_filters(df, T):
         st.session_state['mag_range'] = (mag_min_val, mag_max_val)
 
     mag_range = st.sidebar.slider(
-        "",
+        "Magnitude range",  # Add a descriptive label
         min_value=mag_min_val,
         max_value=mag_max_val,
         value=(mag_min_val, mag_max_val),
         step=0.1,
-        key="mag_range_slider"  # Clave única
+        key="mag_range_slider",
+        label_visibility="collapsed"  # Hide label visually but keep for accessibility
     )
     
     # Depth range filter
@@ -717,12 +736,13 @@ def sidebar_filters(df, T):
     
     # Mover esta línea FUERA del bloque condicional    
     depth_range = st.sidebar.slider(
-        "",
+        "Depth range",  # Add a descriptive label
         min_value=depth_min_val,
         max_value=depth_max_val,
         value=(depth_min_val, depth_max_val),
         step=0.5,
-        key="depth_range_slider"  # Clave única
+        key="depth_range_slider",
+        label_visibility="collapsed"
     )
     
     # Event types filter
@@ -733,7 +753,7 @@ def sidebar_filters(df, T):
         st.session_state['selected_types'] = all_types
         
     selected_types = st.sidebar.multiselect(
-        "",
+        "Event types",
         options=all_types,
         default=st.session_state['selected_types']
     )
@@ -746,7 +766,7 @@ def sidebar_filters(df, T):
         st.session_state['selected_regions'] = []
         
     selected_regions = st.sidebar.multiselect(
-        "",
+        "Regions",
         options=regions,
         default=st.session_state['selected_regions']
     )
@@ -833,101 +853,176 @@ if df is not None and not df.empty:
     if len(filtered_df) == 0:
         st.warning("No data available with the selected filters. Please adjust the filters.")
     else:
+        main_filtered_df = filtered_df.copy()
         main_tabs = st.tabs(["📊 General Summary", "🌐 Geographic Analysis", "⏱️ Temporal Analysis", "📈 Advanced Analysis", "🚨 Alert Center", "📚 Historical Analysis (2005-2025)"], )
 
         # --- General Summary Tab ---
         with main_tabs[0]:
-            with st.container():
-                
-                col1, col2, col3, col4 = st.columns(4)
+            summary_df = main_filtered_df.copy()
+            required_cols = ['mag', 'depth', 'place', 'id']
+            missing_cols = [col for col in required_cols if col not in summary_df.columns]
+            if missing_cols:
+                st.error(f"Missing columns in the DataFrame: {', '.join(missing_cols)}")
+            else:
+                with st.container():
+                    
+                    col1, col2, col3, col4 = st.columns(4)
 
-                # Calculate metrics
-                total_events = len(filtered_df)
-                avg_mag = filtered_df['mag'].mean()
-                max_mag = filtered_df['mag'].max()
-                avg_depth = filtered_df['depth'].mean()
-                
-                with col1:
-                    st.metric(
-                        label="Total Events",
-                        value=f"{total_events}",
-                        delta=None,
-                        delta_color="normal"
-                    )
+                    # Calculate metrics
+                    total_events = len(summary_df)
+                    avg_mag = summary_df['mag'].mean()
+                    max_mag = summary_df['mag'].max()
+                    avg_depth = summary_df['depth'].mean()
 
-                with col2:
-                    st.metric(
-                        label="Average Magnitude",
-                        value=f"{avg_mag:.2f}",
-                        delta=None,
-                        delta_color="normal"
-                    )
+                    with col1:
+                        st.metric(
+                            label="Total Events",
+                            value=f"{total_events}",
+                            delta=None,
+                            delta_color="normal"
+                        )
 
-                with col3:
-                    st.metric(
-                        label="Maximum Magnitude",
-                        value=f"{max_mag:.2f}",
-                        delta=None,
-                        delta_color="normal"
-                    )
-                with col4:
-                    st.metric(
-                        label="Average Depth (km)",
-                        value=f"{avg_depth:.2f}",
-                        delta=None,
-                        delta_color="normal"
-                    )
+                    with col2:
+                        st.metric(
+                            label="Average Magnitude",
+                            value=f"{avg_mag:.2f}",
+                            delta=None,
+                            delta_color="normal"
+                        )
 
-            col_dist1, col_dist2 = st.columns(2)
-            with col_dist1:
-                st.subheader("Magnitude Distribution")
-                st.plotly_chart(plot_magnitude_distribution(filtered_df), use_container_width=True)
-            with col_dist2:
-                st.subheader("Depth Distribution")
-                fig_depth = px.histogram(
+                    with col3:
+                        st.metric(
+                            label="Maximum Magnitude",
+                            value=f"{max_mag:.2f}",
+                            delta=None,
+                            delta_color="normal"
+                        )
+                    with col4:
+                        st.metric(
+                            label="Average Depth (km)",
+                            value=f"{avg_depth:.2f}",
+                            delta=None,
+                            delta_color="normal"
+                        )
+
+                col_dist1, col_dist2 = st.columns(2)
+                with col_dist1:
+                    st.subheader("Magnitude Distribution")
+                    fig_mag = plot_magnitude_distribution(filtered_df)
+                    # Personaliza el gráfico para hacerlo más atractivo
+                    fig_mag.update_traces(marker_line_width=1.5, marker_line_color="#232526", showlegend=True)
+                    fig_mag.update_layout(
+                        plot_bgcolor="#232526",
+                        paper_bgcolor="#232526",
+                        font=dict(color="#ffb347", family="Montserrat"),
+                        xaxis=dict(title="Magnitude", gridcolor="#444", zerolinecolor="#888"),
+                        yaxis=dict(title="Frequency", gridcolor="#444", zerolinecolor="#888"),
+                        bargap=0.15,
+                        legend=dict(
+                            bgcolor="rgba(35,37,38,0.7)",
+                            bordercolor="#ffb347",
+                            borderwidth=1,
+                            orientation="h",
+                            yanchor="bottom",
+                            y=1.02,
+                            xanchor="right",
+                            x=1,
+                            title_text=" "  # Elimina el título de la leyenda
+                        ),
+                        title=" ",  # Elimina el título del gráfico
+                        title_font=dict(size=22, color="#ffb347"),
+                        hoverlabel=dict(bgcolor="#232526", font_size=14, font_family="Fira Mono")
+                    )
+                    # Añade anotación para el valor máximo, ocultando "undefined" si no hay datos
+                    if not filtered_df['mag'].empty:
+                        max_bin = filtered_df['mag'].round(1).value_counts().idxmax()
+                        fig_mag.add_vline(
+                            x=max_bin, line_dash="dash", line_color="#ffb347",
+                            annotation_text=f"Peak: {max_bin}", annotation_position="top"
+                        )
+                    st.plotly_chart(fig_mag, use_container_width=True)
+                with col_dist2:
+                    st.subheader("Depth Distribution")
+                    fig_depth = px.histogram(
+                        filtered_df,
+                        x="depth",
+                        nbins=30,
+                        color="magnitud_categoria",
+                        color_discrete_map=magnitude_colors,
+                        labels={"depth": "Depth (km)", "count": "Frequency", "magnitud_categoria": " "},
+                    )
+                    fig_depth.update_layout(
+                        bargap=0.1,
+                        legend=dict(
+                            orientation="h",
+                            yanchor="bottom",
+                            y=1.02,
+                            xanchor="right",
+                            x=1,
+                            bgcolor="rgba(35,37,38,0.7)",
+                            bordercolor="#ffb347",
+                            borderwidth=1,
+                            title_text=" "
+                        ),
+                        title=" ",
+                        hoverlabel=dict(bgcolor="#232526", font_size=14, font_family="Fira Mono")
+                    )
+                    st.plotly_chart(fig_depth, use_container_width=True)
+
+                st.subheader("Relationship between Magnitude and Depth")
+                size_values = ensure_positive(filtered_df['mag'])
+                fig_scatter = px.scatter(
                     filtered_df,
                     x="depth",
-                    nbins=30,
+                    y="mag",
                     color="magnitud_categoria",
+                    size=size_values,
+                    size_max=15,
+                    opacity=0.7,
+                    hover_name="place",
                     color_discrete_map=magnitude_colors,
-                    labels={"depth": "Depth (km)", "count": "Frequency"},
-                    title="Depth Distribution by Magnitude Category"
+                    labels={"depth": "Depth (km)", "mag": "Magnitude", "magnitud_categoria": " "}
                 )
-                fig_depth.update_layout(bargap=0.1)
-                st.plotly_chart(fig_depth, use_container_width=True)
+                fig_scatter.update_layout(height=500)
+                st.plotly_chart(fig_scatter, use_container_width=True)
 
-            st.subheader("Relationship between Magnitude and Depth")
-            size_values = ensure_positive(filtered_df['mag'])
-            fig_scatter = px.scatter(
-                filtered_df,
-                x="depth",
-                y="mag",
-                color="magnitud_categoria",
-                size=size_values,
-                size_max=15,
-                opacity=0.7,
-                hover_name="place",
-                color_discrete_map=magnitude_colors,
-                labels={"depth": "Depth (km)", "mag": "Magnitude"}
-            )
-            fig_scatter.update_layout(height=500)
-            st.plotly_chart(fig_scatter, use_container_width=True)
+                st.subheader("Top 10 Regions with Highest Seismic Activity")
+                top_places = filtered_df['place'].value_counts().head(10).reset_index()
+                top_places.columns = ['Region', 'Number of Events']
+                fig_top = px.bar(
+                    top_places,
+                    x='Number of Events',
+                    y='Region',
+                    orientation='h',
+                    text='Number of Events',
+                    color='Number of Events',
+                    color_continuous_scale='Viridis',
+                    labels={'Number of Events': 'Number<br>of events'}
+                )
+                fig_top.update_traces(textposition='outside', cliponaxis=False)
+                fig_top.update_layout(
+                    yaxis={'categoryorder': 'total ascending'},
+                    height=400,
+                    margin=dict(l=120, r=200, t=40, b=40),  # Increased right margin
+                    xaxis=dict(constrain='domain'),
+                    autosize=True,
+                    legend=dict(
+                        x=0.05,
+                        y=1,
+                        xanchor='left',
+                        yanchor='top'
+                    )
+                )
+                st.plotly_chart(fig_top, use_container_width=True)
 
-            st.subheader("Top 10 Regions with Highest Seismic Activity")
-            top_places = filtered_df['place'].value_counts().head(10).reset_index()
-            top_places.columns = ['Region', 'Number of Events']
-            fig_top = px.bar(
-                top_places,
-                x='Number of Events',
-                y='Region',
-                orientation='h',
-                text='Number of Events',
-                color='Number of Events',
-                color_continuous_scale='Viridis'
-            )
-            fig_top.update_traces(textposition='outside')
-            fig_top.update_layout(yaxis={'categoryorder': 'total ascending'}, height=400)
-            st.plotly_chart(fig_top, use_container_width=True)
+                # --- Data Table and Download ---
+                with st.expander("View data in tabular format"):
+                    display_cols = [col for col in ['time', 'place', 'mag', 'depth', 'type', 'magType', 'rms'] if col in filtered_df.columns]
+                    sort_col = st.selectbox("Sort by", options=display_cols, index=0, key="sortcol")
+                    sort_order = st.radio("Order", options=['Descending', 'Ascending'], index=0, horizontal=True, key="sortorder")
+                    sorted_df = filtered_df.sort_values(by=sort_col, ascending=(sort_order == 'Ascending'))
+                    st.dataframe(sorted_df[display_cols], use_container_width=True)
+                    download_filtered_data(sorted_df, T)
 
         # --- Geographic Analysis Tab ---
         with main_tabs[1]:
@@ -945,7 +1040,7 @@ if df is not None and not df.empty:
                     hover_data={
                         "latitude": False,
                         "longitude": False,
-                        "magnitud_categoria": False,
+                        "magnitud_categoria": False,  # Oculta la columna en el hover
                         "mag": ":.2f",
                         "depth": ":.2f km",
                         "time": True,
@@ -954,19 +1049,21 @@ if df is not None and not df.empty:
                     color_discrete_map=magnitude_colors,
                     projection="natural earth"
                 )
+                # Oculta el título de la leyenda y el colorbar
                 fig_map.update_layout(
+                    legend_title_text="           ",  # Espacios para ocultar el título de la leyenda
                     margin={"r": 0, "t": 0, "l": 0, "b": 0},
                     height=600,
                     geo=dict(
                         showland=True,
-                        landcolor="#d2b48c",      # yellowish brown for continents
+                        landcolor="#d2b48c",
                         showocean=True,
-                        oceancolor="#002244",     # darker blue for oceans
+                        oceancolor="#002244",
                         showcountries=True,
                         countrycolor="white",
                         showcoastlines=True,
                         coastlinecolor="white",
-                        bgcolor="black"           # black background for the map itself
+                        bgcolor="black"
                     ),
                     paper_bgcolor="black",
                     plot_bgcolor="black"
@@ -981,6 +1078,152 @@ if df is not None and not df.empty:
                     )
                 else:
                     st.info("No events with magnitude ≥ 4.0 in the selected range.")
+
+            with geo_tabs[1]:
+                st.subheader("Seismic Activity Heat Map")
+                st.markdown("This heat map shows areas with higher concentration of seismic activity. Brighter areas indicate higher density of events.")
+                fig_heat = px.density_map(  # Changed from density_mapbox to density_map
+                    filtered_df,
+                    lat="latitude",
+                    lon="longitude",
+                    z="mag",
+                    radius=10,
+                    center=dict(lat=filtered_df['latitude'].mean(), lon=filtered_df['longitude'].mean()),
+                    zoom=1,
+                    map_style="carto-positron",  # Changed to map_style from mapbox_style
+                    opacity=0.8
+                )
+                fig_heat.update_layout(margin={"r": 0, "t": 0, "l": 0, "b": 0}, height=600)
+                st.plotly_chart(fig_heat, use_container_width=True)
+                st.subheader("Significant Events (Magnitude ≥ 4.0)")
+                strong_events = filtered_df[filtered_df['mag'] >= 4.0].sort_values(by='mag', ascending=False)
+                if not strong_events.empty:
+                    st.dataframe(
+                        strong_events[['time', 'place', 'mag', 'depth', 'type']],
+                        use_container_width=True
+                    )
+                else:
+                    st.info("No events with magnitude ≥ 4.0 in the selected range.")
+         
+            with geo_tabs[2]:
+                st.subheader("Geographic Cluster Analysis")
+                st.markdown("This analysis identifies groups of earthquakes that might be geographically related. It uses the DBSCAN algorithm which groups events based on their spatial proximity.")
+                if len(filtered_df) > 10:
+                    cluster_df = filtered_df[['latitude', 'longitude']].copy()
+                    scaler = StandardScaler()
+                    cluster_data = scaler.fit_transform(cluster_df)
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        eps_distance = st.slider(
+                            "Maximum distance between events to consider them neighbors (eps)",
+                            min_value=0.05,
+                            max_value=1.0,
+                            value=0.2,
+                            step=0.05
+                        )
+                    with col2:
+                        min_samples = st.slider(
+                            "Minimum number of events to form a cluster",
+                            min_value=2,
+                            max_value=20,
+                            value=5,
+                            step=1
+                        )
+                    with st.spinner("Performing cluster analysis..."):
+                        dbscan = DBSCAN(eps=eps_distance, min_samples=min_samples)
+                        cluster_result = dbscan.fit_predict(cluster_data)
+                        filtered_df.loc[:, 'cluster'] = cluster_result
+
+                    n_clusters = len(set(filtered_df['cluster'])) - (1 if -1 in filtered_df['cluster'] else 0)
+                    n_noise = list(filtered_df['cluster']).count(-1)
+                    col1, col2 = st.columns(2)
+                    col1.metric("Number of identified clusters", n_clusters)
+                    col2.metric("Ungrouped events (noise)", n_noise)
+
+                    # Assign geographical names to clusters
+                    cluster_names = {}
+                    for cluster_id in sorted(set(filtered_df['cluster'])):
+                        if cluster_id == -1:
+                            cluster_names[cluster_id] = "No Cluster"
+                        else:
+                            # Get the most common region name in this cluster
+                            region_mode = (
+                                filtered_df[filtered_df['cluster'] == cluster_id]['region']
+                                .mode()
+                            )
+                            if not region_mode.empty:
+                                cluster_names[cluster_id] = f"{region_mode.iloc[0]}"
+                            else:
+                                cluster_names[cluster_id] = f"Cluster {cluster_id}"
+
+                    filtered_df['cluster_name'] = filtered_df['cluster'].map(cluster_names)
+
+                    # Assign colors: black for "No Cluster", others use Plotly default palette
+                    unique_names = filtered_df['cluster_name'].unique().tolist()
+                    color_map = {}
+                    palette = px.colors.qualitative.Plotly
+                    color_idx = 0
+                    for name in unique_names:
+                        if name == "No Cluster":
+                            color_map[name] = "black"
+                        else:
+                            color_map[name] = palette[color_idx % len(palette)]
+                            color_idx += 1
+
+                    st.markdown("### Clusters Map")
+                    fig_cluster = px.scatter_geo(
+                        filtered_df,
+                        lat="latitude",
+                        lon="longitude",
+                        color="cluster_name",
+                        size=ensure_positive(filtered_df['mag']),
+                        size_max=15,
+                        hover_name="place",
+                        hover_data={
+                            "latitude": False,
+                            "longitude": False,
+                            "cluster_name": False,  # Hide cluster_name in hover
+                            "mag": ":.2f",
+                            "depth": ":.2f km",
+                            "time": True
+                        },
+                        color_discrete_map=color_map,
+                        projection="natural earth"
+                    )
+                    # Center the map on the globe
+                    fig_cluster.update_geos(
+                        center=dict(lat=0, lon=0),
+                        projection_scale=1,
+                        showcountries=True,
+                        showcoastlines=True,
+                        showland=True,
+                        landcolor="#d2b48c",
+                        oceancolor="#00356B",
+                        bgcolor="black"
+                    )
+                    # Hide legend title and replace with spaces
+                    fig_cluster.update_layout(
+                        legend_title_text="            ",  # Spaces instead of "cluster_name"
+                        margin={"r": 0, "t": 0, "l": 0, "b": 0},
+                        height=500,
+                        paper_bgcolor="black",
+                        geo=dict(
+                            showland=True,
+                            landcolor="#d2b48c",  # Yellowish-brown for continents
+                            showocean=True,
+                            oceancolor="#00356B",  # Slightly darker blue for oceans
+                            showcountries=True,
+                            countrycolor="white",
+                            showcoastlines=True,
+                            coastlinecolor="white",
+                            bgcolor="black",
+                            center=dict(lat=0, lon=0),
+                            projection_scale=1
+                        )
+                    )
+                    st.plotly_chart(fig_cluster, use_container_width=True)
+                else:
+                    st.warning("Not enough data to perform cluster analysis with current filters.")
 
             with geo_tabs[3]:
                 st.header("🌋 Volcanology and Seismic Relationships")
@@ -1002,13 +1245,13 @@ if df is not None and not df.empty:
                                 # Intenta cargar desde el archivo local primero
                                 try:
                                     df_volcano = pd.read_csv('data/volcano_data.csv', encoding=encoding)
-                                    st.success(f"Volcano data loaded successfully using {encoding} encoding")
+                                    
                                     return df_volcano
                                 except FileNotFoundError:
                                     # Si el archivo no existe, descarga un conjunto de datos de muestra
                                     url = "https://raw.githubusercontent.com/plotly/datasets/master/volcano_db.csv"
                                     df_volcano = pd.read_csv(url, encoding=encoding)
-                                    st.success(f"Volcano data downloaded from GitHub using {encoding} encoding")
+                                    
                                     return df_volcano
                             except UnicodeDecodeError:
                                 continue  # Prueba con la siguiente codificación
@@ -1186,7 +1429,7 @@ if df is not None and not df.empty:
                             fig_types = px.pie(
                                 values=type_counts.values,
                                 names=type_counts.index,
-                                title="Distribution by Volcano Type",
+                                
                                 color_discrete_sequence=px.colors.sequential.Inferno,
                                 hole=0.4
                             )
@@ -1207,7 +1450,7 @@ if df is not None and not df.empty:
                                     x=status_counts.index, 
                                     y=status_counts.values,
                                     labels={'x': 'Status', 'y': 'Count'},
-                                    title='Volcano Status Distribution',
+                                    
                                     color=status_counts.values,
                                     color_continuous_scale=px.colors.sequential.Inferno
                                 )
@@ -1219,7 +1462,7 @@ if df is not None and not df.empty:
                                     x=activity_counts.index, 
                                     y=activity_counts.values,
                                     labels={'x': 'Last Eruption', 'y': 'Count'},
-                                    title='Last Eruption Recency',
+                                    
                                     color=activity_counts.values,
                                     color_continuous_scale=px.colors.sequential.Inferno
                                 )
@@ -1238,7 +1481,7 @@ if df is not None and not df.empty:
                                 x='Number of Volcanoes',
                                 orientation='h',
                                 color='Number of Volcanoes',
-                                title='Top 15 Countries by Volcano Count',
+                                
                                 color_continuous_scale=px.colors.sequential.Inferno
                             )
                             fig_countries.update_layout(yaxis={'categoryorder': 'total ascending'})
@@ -1252,7 +1495,7 @@ if df is not None and not df.empty:
                                 df_volcano,
                                 x='elevation',
                                 nbins=50,
-                                title='Volcano Elevation Distribution',
+                                
                                 color_discrete_sequence=['rgba(255, 102, 0, 0.8)']
                             )
                             fig_elev.update_layout(
@@ -1267,7 +1510,7 @@ if df is not None and not df.empty:
                                     df_volcano,
                                     x='volcano_type_category', 
                                     y='elevation',
-                                    title='Elevation by Volcano Type',
+                                  
                                     color='volcano_type_category',
                                     color_discrete_sequence=px.colors.sequential.Inferno
                                 )
@@ -1311,7 +1554,7 @@ if df is not None and not df.empty:
                                 'latitude': False,
                                 'longitude': False
                             },
-                            title='Global Volcano Distribution',
+                     
                             size_max=15,
                             projection='natural earth'
                         )
@@ -1376,12 +1619,12 @@ if df is not None and not df.empty:
                                 'country': True,
                                 'elevation': ':.0f m',
                                 'status_category': True,
-                                'last_known': ':.0f m',  # Usa la columna correcta
+                                'last_known': True,
                                 'latitude': False,
                                 'longitude': False
                             },
                             labels={'last_known': 'Last Known'},
-                            title='Volcanoes in the Pacific Ring of Fire',
+                     
                             color_discrete_map={
                                 'Ring of Fire': '#FF4500',  # Bright orange-red
                                 'Other Regions': '#707070'  # Gray
@@ -1438,7 +1681,7 @@ if df is not None and not df.empty:
                             center=dict(lat=0, lon=0),
                             zoom=0,
                             mapbox_style="carto-darkmatter",
-                            title='Global Volcano Density',
+                            
                             color_continuous_scale='Inferno'
                         )
                         
@@ -1531,9 +1774,9 @@ if df is not None and not df.empty:
                                     x=century_counts.index,
                                     y=century_counts.values,
                                     labels={'x': 'Century', 'y': 'Number of Eruptions'},
-                                    title='Volcanic Eruptions by Century',
+                                   
                                     color=century_counts.values,
-                                    color_continuous_scale='Inferno'
+                                    color_continuous_scale=px.colors.sequential.Inferno
                                 )
                                 
                                 st.plotly_chart(fig_centuries, use_container_width=True)
@@ -1569,11 +1812,23 @@ if df is not None and not df.empty:
                                     orientation='h',
                                     color='Number of Active Volcanoes',
                                     title=f'Top 15 {active_by_region.columns[0]}s by Active Volcanoes',
-                                    color_continuous_scale='Inferno'
+                                    color_continuous_scale=px.colors.sequential.Inferno,
+                                    labels={'Number of Active Volcanoes': 'Number of<br>Active Volcanoes'}
                                 )
-                                fig_active.update_layout(yaxis={'categoryorder': 'total ascending'})
+                                fig_active.update_layout(
+                                    yaxis={'categoryorder': 'total ascending'},
+                                    coloraxis_colorbar=dict(
+                                        title='Number of<br>Active Volcanoes',
+                                        x=0.85,  # mueve la barra de color más a la izquierda
+                                        xanchor='left',
+                                        title_side='right'
+                                       
+                                    ),
+                                    margin=dict(r=120)  # más margen derecho para que no se corte la leyenda
+                                )
+                                # Remove the colorbar label at the bottom (x-axis title)
+                                fig_active.update_xaxes(title_text=None)
                                 st.plotly_chart(fig_active, use_container_width=True)
-                                
                                 # Table of most notable active volcanoes
                                 st.subheader("Notable Active Volcanoes")
                                 
@@ -1592,7 +1847,6 @@ if df is not None and not df.empty:
                                 
                                 # Display table
                                 st.dataframe(notable_volcanoes[display_cols], use_container_width=True)
-                        
                         # Volcano types and characteristics
                         if 'volcano_type_category' in df_volcano.columns and 'elevation' in df_volcano.columns:
                             st.subheader("Volcano Types and Characteristics")
@@ -1607,7 +1861,7 @@ if df is not None and not df.empty:
                                     x='volcano_type_category',
                                     y='elevation',
                                     color='volcano_type_category',
-                                    title='Elevation Distribution by Volcano Type',
+                                  
                                     labels={'volcano_type_category': 'Type', 'elevation': 'Elevation (m)'}
                                 )
                                 st.plotly_chart(fig_elev_box, use_container_width=True)
@@ -1629,7 +1883,7 @@ if df is not None and not df.empty:
                                         type_activity_pct,
                                         text_auto='.1f',
                                         labels=dict(x="Activity Category", y="Volcano Type", color="Percentage"),
-                                        title="Relationship Between Volcano Type and Recent Activity",
+                                        
                                         color_continuous_scale='Inferno'
                                     )
                                     fig_type_activity.update_traces(
@@ -1639,7 +1893,9 @@ if df is not None and not df.empty:
                         
                         # Educational content
                         with st.expander("📚 Learn About Different Volcano Types"):
+                            st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/4/4f/Volcano_types.svg/1200px-Volcano_types.svg.png", use_container_width=True)
                             st.markdown("""
+
                             ### Major Types of Volcanoes
                             
                             Different types of volcanoes are characterized by their shape, size, eruption style, and the materials they're built from:
@@ -1677,7 +1933,7 @@ if df is not None and not df.empty:
                         st.markdown("""
                         This section analyzes the spatial and causal relationships between seismic activity and volcanic phenomena.
                         Both earthquakes and volcanoes are manifestations of Earth's tectonic processes, often occurring
-                        in similar geographical regions.
+                        in similar geographical regions due to shared underlying causes.
                         """)
                         
                         # Distance calculation function
@@ -1737,12 +1993,9 @@ if df is not None and not df.empty:
                             hovertemplate="<b>Volcano: %{text}</b><br>Location: (%{lat:.2f}, %{lon:.2f})<extra></extra>"
                         ))
                         
-                        # Add tectonic plate boundaries if available
-                        # This would require additional data source
-                        
                         # Update map layout
                         fig_combined.update_layout(
-                            title="Global Distribution of Earthquakes and Volcanoes",
+                            
                             geo=dict(
                                 showland=True,
                                 landcolor="#d2b48c",
@@ -1771,7 +2024,6 @@ if df is not None and not df.empty:
                         # Proximity Analysis
                         if filtered_df is not None and len(filtered_df) > 0:
                             st.subheader("Proximity Analysis")
-                            
                             st.markdown("""
                             This analysis examines the spatial relationship between earthquakes and volcanoes,
                             calculating the distance from each earthquake to the nearest volcano.
@@ -1780,34 +2032,34 @@ if df is not None and not df.empty:
                             # Parameters for analysis
                             distance_threshold = st.slider(
                                 "Distance threshold for earthquake-volcano relationship (km)",
-                                min_value=50,
-                                max_value=500,
-                                value=200,
-                                step=50
+                                min_value=500,
+                                max_value=10000,
+                                value=5000,
+                                step=500
                             )
-                            
-                            # Calculate distances (computationally intensive, so limit to recent earthquakes)
-                            max_quakes_to_analyze = 1000  # Limit for performance
+
+                            # Limit to 100 most recent earthquakes
+                            max_quakes_to_analyze = 100
                             recent_earthquakes = filtered_df.sort_values('time', ascending=False).head(max_quakes_to_analyze)
-                            
+
+                            # Limit to 50 volcanoes (e.g., by elevation or just first 50)
+                            if 'elevation' in df_volcano.columns:
+                                selected_volcanoes = df_volcano.sort_values('elevation', ascending=False).head(50)
+                            else:
+                                selected_volcanoes = df_volcano.head(50)
+
                             with st.spinner("Calculating proximity relationships..."):
-                                # Prepare results container
                                 proximity_results = []
-                                
-                                # Analyze each earthquake
+
                                 for idx, quake in recent_earthquakes.iterrows():
-                                    # Find distance to all volcanoes
                                     distances = []
-                                    for _, volcano in df_volcano.iterrows():
+                                    for _, volcano in selected_volcanoes.iterrows():
                                         dist = calculate_distance(
                                             quake['latitude'], quake['longitude'],
                                             volcano['latitude'], volcano['longitude']
                                         )
                                         distances.append((dist, volcano['volcano_name'], volcano['country']))
-                                    
-                                    # Find nearest volcano
                                     nearest = min(distances, key=lambda x: x[0])
-                                    
                                     proximity_results.append({
                                         'earthquake_time': quake['time'],
                                         'earthquake_mag': quake['mag'],
@@ -1816,15 +2068,12 @@ if df is not None and not df.empty:
                                         'volcano_country': nearest[2],
                                         'distance_km': nearest[0]
                                     })
-                                
-                                # Convert to DataFrame
+
                                 proximity_df = pd.DataFrame(proximity_results)
-                                
-                                # Calculate statistics
+
                                 near_volcano_count = sum(proximity_df['distance_km'] <= distance_threshold)
                                 near_volcano_percentage = (near_volcano_count / len(proximity_df)) * 100
-                                
-                                # Display stats
+
                                 col1, col2 = st.columns(2)
                                 with col1:
                                     st.metric(
@@ -1836,13 +2085,13 @@ if df is not None and not df.empty:
                                         "Percentage", 
                                         f"{near_volcano_percentage:.1f}%"
                                     )
-                                
+
                                 # Distribution of distances
                                 fig_distances = px.histogram(
                                     proximity_df,
                                     x='distance_km',
                                     nbins=50,
-                                    title='Distribution of Distances from Earthquakes to Nearest Volcano',
+                                    
                                     labels={'distance_km': 'Distance (km)', 'count': 'Number of Earthquakes'}
                                 )
                                 fig_distances.add_vline(
@@ -1851,7 +2100,7 @@ if df is not None and not df.empty:
                                     annotation_text=f"Threshold: {distance_threshold} km"
                                 )
                                 st.plotly_chart(fig_distances, use_container_width=True)
-                                
+
                                 # Scatter plot of magnitude vs distance
                                 fig_mag_dist = px.scatter(
                                     proximity_df,
@@ -1860,7 +2109,7 @@ if df is not None and not df.empty:
                                     color='earthquake_mag',
                                     size=ensure_positive(proximity_df['earthquake_mag']),
                                     hover_data=['earthquake_place', 'nearest_volcano'],
-                                    title='Earthquake Magnitude vs Distance to Nearest Volcano',
+                                    
                                     labels={
                                         'distance_km': 'Distance to Nearest Volcano (km)',
                                         'earthquake_mag': 'Magnitude'
@@ -1873,19 +2122,15 @@ if df is not None and not df.empty:
                                     annotation_text=f"Threshold: {distance_threshold} km"
                                 )
                                 st.plotly_chart(fig_mag_dist, use_container_width=True)
-                                
+
                                 # Top earthquake-volcano pairs
                                 st.subheader("Closest Earthquake-Volcano Pairs")
-                                
-                                # Get earthquakes close to volcanoes
                                 close_pairs = proximity_df[proximity_df['distance_km'] <= distance_threshold].sort_values('distance_km')
                                 if len(close_pairs) > 0:
-                                    # Format for display
                                     display_pairs = close_pairs[['earthquake_time', 'earthquake_mag', 'earthquake_place', 
-                                                              'nearest_volcano', 'volcano_country', 'distance_km']].head(20)
+                                                                'nearest_volcano', 'volcano_country', 'distance_km']].head(20)
                                     display_pairs.columns = ['Time', 'Magnitude', 'Earthquake Location', 
                                                             'Nearest Volcano', 'Volcano Country', 'Distance (km)']
-                                    
                                     st.dataframe(display_pairs, use_container_width=True)
                                 else:
                                     st.info(f"No earthquakes found within {distance_threshold} km of a volcano.")
@@ -1945,7 +2190,7 @@ if df is not None and not df.empty:
                         ))
                         
                         fig_temporal.update_layout(
-                            title='Simulated Temporal Correlation Between Volcanic Eruptions and Earthquake Frequency',
+                            
                             xaxis_title='Time Relative to Eruption',
                             yaxis_title='Correlation Coefficient',
                             yaxis=dict(range=[0, 1]),
@@ -2009,406 +2254,288 @@ if df is not None and not df.empty:
                 else:
                     st.error("Failed to load or process the volcano dataset properly.")
 
-            with geo_tabs[1]:
-                st.subheader("Seismic Activity Heat Map")
-                st.markdown("This heat map shows areas with higher concentration of seismic activity. Brighter areas indicate higher density of events.")
-                fig_heat = px.density_mapbox(
-                    filtered_df,
-                    lat="latitude",
-                    lon="longitude",
-                    z=ensure_positive(filtered_df['mag']),
-                    radius=10,
-                    center=dict(lat=filtered_df['latitude'].mean(), lon=filtered_df['longitude'].mean()),
-                    zoom=1,
-                    mapbox_style="open-street-map",
-                    opacity=0.8
-                )
-                fig_heat.update_layout(margin={"r": 0, "t": 0, "l": 0, "b": 0}, height=600)
-                st.plotly_chart(fig_heat, use_container_width=True)
-                st.subheader("Significant Events (Magnitude ≥ 4.0)")
-                strong_events = filtered_df[filtered_df['mag'] >= 4.0].sort_values(by='mag', ascending=False)
-                if not strong_events.empty:
-                    st.dataframe(
-                        strong_events[['time', 'place', 'mag', 'depth', 'type']],
-                        use_container_width=True
-                    )
-                else:
-                    st.info("No events with magnitude ≥ 4.0 in the selected range.")
-
-                    # Tab 3: Temporal Analysis
-        
-            with geo_tabs[2]:
-                st.subheader("Geographic Cluster Analysis")
-                st.markdown("This analysis identifies groups of earthquakes that might be geographically related. It uses the DBSCAN algorithm which groups events based on their spatial proximity.")
-                if len(filtered_df) > 10:
-                    cluster_df = filtered_df[['latitude', 'longitude']].copy()
-                    scaler = StandardScaler()
-                    cluster_data = scaler.fit_transform(cluster_df)
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        eps_distance = st.slider(
-                            "Maximum distance between events to consider them neighbors (eps)",
-                            min_value=0.05,
-                            max_value=1.0,
-                            value=0.2,
-                            step=0.05
-                        )
-                    with col2:
-                        min_samples = st.slider(
-                            "Minimum number of events to form a cluster",
-                            min_value=2,
-                            max_value=20,
-                            value=5,
-                            step=1
-                        )
-                    with st.spinner("Performing cluster analysis..."):
-                        dbscan = DBSCAN(eps=eps_distance, min_samples=min_samples)
-                        cluster_result = dbscan.fit_predict(cluster_data)
-                        filtered_df.loc[:, 'cluster'] = cluster_result
-
-                    n_clusters = len(set(filtered_df['cluster'])) - (1 if -1 in filtered_df['cluster'] else 0)
-                    n_noise = list(filtered_df['cluster']).count(-1)
-                    col1, col2 = st.columns(2)
-                    col1.metric("Number of identified clusters", n_clusters)
-                    col2.metric("Ungrouped events (noise)", n_noise)
-
-                    # Assign geographical names to clusters
-                    cluster_names = {}
-                    for cluster_id in sorted(set(filtered_df['cluster'])):
-                        if cluster_id == -1:
-                            cluster_names[cluster_id] = "No Cluster"
-                        else:
-                            # Get the most common region name in this cluster
-                            region_mode = (
-                                filtered_df[filtered_df['cluster'] == cluster_id]['region']
-                                .mode()
-                            )
-                            if not region_mode.empty:
-                                cluster_names[cluster_id] = f"{region_mode.iloc[0]}"
-                            else:
-                                cluster_names[cluster_id] = f"Cluster {cluster_id}"
-
-                    filtered_df['cluster_name'] = filtered_df['cluster'].map(cluster_names)
-
-                    # Assign colors: black for "No Cluster", others use Plotly default palette
-                    unique_names = filtered_df['cluster_name'].unique().tolist()
-                    color_map = {}
-                    palette = px.colors.qualitative.Plotly
-                    color_idx = 0
-                    for name in unique_names:
-                        if name == "No Cluster":
-                            color_map[name] = "black"
-                        else:
-                            color_map[name] = palette[color_idx % len(palette)]
-                            color_idx += 1
-
-                    st.markdown("### Clusters Map")
-                    fig_cluster = px.scatter_geo(
-                        filtered_df,
-                        lat="latitude",
-                        lon="longitude",
-                        color="cluster_name",
-                        size=ensure_positive(filtered_df['mag']),
-                        size_max=15,
-                        hover_name="place",
-                        hover_data={
-                            "latitude": False,
-                            "longitude": False,
-                            "cluster_name": True,
-                            "mag": ":.2f",
-                            "depth": ":.2f km",
-                            "time": True
-                        },
-                        color_discrete_map=color_map,
-                        projection="natural earth"
-                    )
-
-                    # Create starry background effect
-                    n_stars = 500
-                    random_stars = {
-                        'type': 'scattergeo',
-                        'lon': np.random.uniform(-180, 180, n_stars),
-                        'lat': np.random.uniform(-90, 90, n_stars),
-                        'mode': 'markers',
-                        'marker': {
-                            'size': np.random.uniform(0.1, 1, n_stars),
-                            'opacity': np.random.uniform(0.3, 0.8, n_stars),
-                            'color': 'white'
-                        },
-                        'showlegend': False,
-                        'hoverinfo': 'none'
-                    }
-
-                    # Add stars to the map
-                    fig_cluster.add_trace(random_stars)
-
-                    fig_cluster.update_layout(
-                        margin={"r": 0, "t": 0, "l": 0, "b": 0},
-                        height=500,
-                        paper_bgcolor="black",
-                        geo=dict(
-                            showland=True,
-                            landcolor="#d2b48c",  # Yellowish-brown for continents
-                            showocean=True,
-                            oceancolor="#00356B",  # Slightly darker blue for oceans
-                            showcountries=True,
-                            countrycolor="white",
-                            showcoastlines=True,
-                            coastlinecolor="white",
-                            bgcolor="black"  # Black background for the map itself
-                        )
-                    )
-                    st.plotly_chart(fig_cluster, use_container_width=True)
-                else:
-                    st.warning("Not enough data to perform cluster analysis with current filters.")
-
-
-                    # --- Temporal Analysis Tab ---
-                    with main_tabs[2]:
-                        st.subheader("Temporal Pattern Analysis")
-                        # Create tabs for different temporal analyses
-                        temp_tab1, temp_tab2, temp_tab3 = st.tabs([
-                            "Daily Evolution", 
-                            "Weekly Patterns",
-                            "Hourly Patterns"
-                        ])
+        # --- Temporal Analysis Tab ---
+        with main_tabs[2]:
+            # Usar copia local para esta pestaña
+            temporal_df = main_filtered_df.copy()
+            
+            # Verificar columnas necesarias
+            required_cols = ['time', 'day', 'hour', 'day_of_week', 'id', 'mag']
+            missing_cols = [col for col in required_cols if col not in temporal_df.columns]
+            
+            if missing_cols:
+                st.warning(f"Missing required columns for Temporal Analysis: {', '.join(missing_cols)}")
+            elif len(temporal_df) == 0:
+                st.warning("No data available for temporal analysis. Please adjust the filters.")
+            else:
+                # Crear columnas derivadas si no existen
+                if 'day' not in temporal_df.columns and 'time' in temporal_df.columns:
+                    temporal_df['day'] = temporal_df['time'].dt.date
+                
+                if 'hour' not in temporal_df.columns and 'time' in temporal_df.columns:
+                    temporal_df['hour'] = temporal_df['time'].dt.hour
+                    
+                if 'day_of_week' not in temporal_df.columns and 'time' in temporal_df.columns:
+                    temporal_df['day_of_week'] = temporal_df['time'].dt.day_name()
+                
+                    
+                # Create tabs for different temporal analyses
+                temp_tab1, temp_tab2, temp_tab3 = st.tabs([
+                    "Daily Evolution", 
+                    "Weekly Patterns",
+                    "Hourly Patterns"
+                ])
+                
+                # Tab 1: Daily Evolution
+                with temp_tab1:
+                    st.subheader("Daily Evolution of Seismic Activity")
+                    try:
                         
-                        # Tab 1: Daily Evolution
-                        with temp_tab1:
-                            st.subheader("Daily Evolution of Seismic Activity")
+                        
+                        # Group by day
+                    
+                        daily_counts = filtered_df.groupby('day').agg({
+                            'id': 'count',
+                            'mag': ['mean', 'max']
+                        }).reset_index()
+                        
+                        daily_counts.columns = ['Date', 'Count', 'Average Magnitude', 'Maximum Magnitude']
+                        daily_counts['Date'] = pd.to_datetime(daily_counts['Date'])
+                        
+                        # Create chart
+                        fig_daily = go.Figure()
+                        
+                        # Add bars for event count
+                        fig_daily.add_trace(go.Bar(
+                            x=daily_counts['Date'],
+                            y=daily_counts['Count'],
+                            name='Number of Events',
+                            marker_color='lightblue',
+                            opacity=0.7
+                        ))
+                        
+                        # Add line for maximum magnitude
+                        fig_daily.add_trace(go.Scatter(
+                            x=daily_counts['Date'],
+                            y=daily_counts['Maximum Magnitude'],
+                            name='Maximum Magnitude',
+                            mode='lines+markers',
+                            marker=dict(color='red', size=6),
+                            line=dict(width=2, dash='solid'),
+                            yaxis='y2'
+                        ))
+                        
+                        # Add line for average magnitude
+                        fig_daily.add_trace(go.Scatter(
+                            x=daily_counts['Date'],
+                            y=daily_counts['Average Magnitude'],
+                            name='Average Magnitude',
+                            mode='lines',
+                            marker=dict(color='orange'),
+                            line=dict(width=2, dash='dot'),
+                            yaxis='y2'
+                        ))
+                        
+                        # Configure axes and layout
+                        fig_daily.update_layout(
+                            title='Daily Evolution of Seismic Events',
+                            xaxis=dict(title='Date', tickformat='%d-%b'),
+                            yaxis=dict(title='Number of Events', side='left'),
+                            yaxis2=dict(
+                                title='Magnitude',
+                                side='right',
+                                overlaying='y',
+                                range=[0, max(daily_counts['Maximum Magnitude']) + 0.5]
+                            ),
+                            legend=dict(x=0.01, y=0.99, bgcolor='rgba(255,255,255,0.8)'),
+                            hovermode='x unified',
+                            height=500
+                        )
+                        
+                        st.plotly_chart(fig_daily, use_container_width=True)
+                        
+                        # Add trend analysis
+                        if len(daily_counts) > 5:
+                            st.subheader("Trend Analysis")
                             
-                            # Group by day
-                            try:
-                                daily_counts = filtered_df.groupby('day').agg({
-                                    'id': 'count',
-                                    'mag': ['mean', 'max']
-                                }).reset_index()
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                # Calculate the trend of events per day
+                                x = np.arange(len(daily_counts))
+                                y = daily_counts['Count']
+                                z = np.polyfit(x, y, 1)
+                                p = np.poly1d(z)
                                 
-                                daily_counts.columns = ['Date', 'Count', 'Average Magnitude', 'Maximum Magnitude']
-                                daily_counts['Date'] = pd.to_datetime(daily_counts['Date'])
+                                trend_direction = "increasing" if z[0] > 0 else "decreasing"
+                                trend_value = abs(z[0])
                                 
-                                # Create chart
-                                fig_daily = go.Figure()
-                                
-                                # Add bars for event count
-                                fig_daily.add_trace(go.Bar(
-                                    x=daily_counts['Date'],
-                                    y=daily_counts['Count'],
-                                    name='Number of Events',
-                                    marker_color='lightblue',
-                                    opacity=0.7
-                                ))
-                                
-                                # Add line for maximum magnitude
-                                fig_daily.add_trace(go.Scatter(
-                                    x=daily_counts['Date'],
-                                    y=daily_counts['Maximum Magnitude'],
-                                    name='Maximum Magnitude',
-                                    mode='lines+markers',
-                                    marker=dict(color='red', size=6),
-                                    line=dict(width=2, dash='solid'),
-                                    yaxis='y2'
-                                ))
-                                
-                                # Add line for average magnitude
-                                fig_daily.add_trace(go.Scatter(
-                                    x=daily_counts['Date'],
-                                    y=daily_counts['Average Magnitude'],
-                                    name='Average Magnitude',
-                                    mode='lines',
-                                    marker=dict(color='orange'),
-                                    line=dict(width=2, dash='dot'),
-                                    yaxis='y2'
-                                ))
-                                
-                                # Configure axes and layout
-                                fig_daily.update_layout(
-                                    title='Daily Evolution of Seismic Events',
-                                    xaxis=dict(title='Date', tickformat='%d-%b'),
-                                    yaxis=dict(title='Number of Events', side='left'),
-                                    yaxis2=dict(
-                                        title='Magnitude',
-                                        side='right',
-                                        overlaying='y',
-                                        range=[0, max(daily_counts['Maximum Magnitude']) + 0.5]
-                                    ),
-                                    legend=dict(x=0.01, y=0.99, bgcolor='rgba(255,255,255,0.8)'),
-                                    hovermode='x unified',
-                                    height=500
+                                st.metric(
+                                    "Event Trend", 
+                                    f"{trend_direction} ({trend_value:.2f} events/day)",
+                                    delta=f"{trend_value:.2f}" if z[0] > 0 else f"-{trend_value:.2f}"
                                 )
+                            
+                            with col2:
+                                # Calculate the trend of magnitude per day
+                                x = np.arange(len(daily_counts))
+                                y = daily_counts['Average Magnitude']
+                                z_mag = np.polyfit(x, y, 1)
+                                p_mag = np.poly1d(z_mag)
                                 
-                                st.plotly_chart(fig_daily, use_container_width=True)
+                                trend_direction_mag = "increasing" if z_mag[0] > 0 else "decreasing"
+                                trend_value_mag = abs(z_mag[0])
                                 
-                                # Add trend analysis
-                                if len(daily_counts) > 5:
-                                    st.subheader("Trend Analysis")
-                                    
-                                    col1, col2 = st.columns(2)
-                                    
-                                    with col1:
-                                        # Calculate the trend of events per day
-                                        x = np.arange(len(daily_counts))
-                                        y = daily_counts['Count']
-                                        z = np.polyfit(x, y, 1)
-                                        p = np.poly1d(z)
-                                        
-                                        trend_direction = "increasing" if z[0] > 0 else "decreasing"
-                                        trend_value = abs(z[0])
-                                        
-                                        st.metric(
-                                            "Event Trend", 
-                                            f"{trend_direction} ({trend_value:.2f} events/day)",
-                                            delta=f"{trend_value:.2f}" if z[0] > 0 else f"-{trend_value:.2f}"
-                                        )
-                                    
-                                    with col2:
-                                        # Calculate the trend of magnitude per day
-                                        x = np.arange(len(daily_counts))
-                                        y = daily_counts['Average Magnitude']
-                                        z_mag = np.polyfit(x, y, 1)
-                                        p_mag = np.poly1d(z_mag)
-                                        
-                                        trend_direction_mag = "increasing" if z_mag[0] > 0 else "decreasing"
-                                        trend_value_mag = abs(z_mag[0])
-                                        
-                                        st.metric(
-                                            "Magnitude Trend", 
-                                            f"{trend_direction_mag} ({trend_value_mag:.3f} mag/day)",
-                                            delta=f"{trend_value_mag:.3f}" if z_mag[0] > 0 else f"-{trend_value_mag:.3f}"
-                                        )
-                            except Exception as e:
-                                st.error(f"Error in daily evolution analysis: {e}")
+                                st.metric(
+                                    "Magnitude Trend", 
+                                    f"{trend_direction_mag} ({trend_value_mag:.3f} mag/day)",
+                                    delta=f"{trend_value_mag:.3f}" if z_mag[0] > 0 else f"-{trend_value_mag:.3f}"
+                                )
+                    except Exception as e:
+                        st.error(f"Error in daily evolution analysis: {e}")
+
+                # Tab 2: Weekly Patterns
+                with temp_tab2:
+                    try:
+                        # Usar copia local para este subtab
+                        weekly_df = temporal_df.copy()
                         
-                        # Tab 2: Weekly Patterns
-                        with temp_tab2:
-                            try:
-                                # Translate days of the week
-                                filtered_df['day_name'] = filtered_df['day_of_week'].map(days_translation)
-                                
-                                # Sort days of the week correctly
-                                days_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-                                ordered_days = [days_translation[day] for day in days_order]
-                                
-                                # Group by day of the week
-                                dow_data = filtered_df.groupby('day_name').agg({
-                                    'id': 'count',
-                                    'mag': ['mean', 'max']
-                                }).reset_index()
-                                
-                                # Rename columns
-                                dow_data.columns = ['Day', 'Count', 'Average Magnitude', 'Maximum Magnitude']
-                                
-                                # Order days
-                                dow_data['Day_ordered'] = pd.Categorical(dow_data['Day'], categories=ordered_days, ordered=True)
-                                dow_data = dow_data.sort_values('Day_ordered')
-                                
-                                # Create chart
-                                fig_dow = px.bar(
-                                    dow_data,
-                                    x='Day',
-                                    y='Count',
-                                    color='Average Magnitude',
-                                    text='Count',
-                                    title='Events Distribution by Day of the Week',
-                                    color_continuous_scale='Viridis',
-                                    labels={'Count': 'Number of Events', 'Average Magnitude': 'Average Magnitude'}
-                                )
-                                
-                                fig_dow.update_traces(textposition='outside')
-                                fig_dow.update_layout(height=400)
-                                
-                                st.plotly_chart(fig_dow, use_container_width=True)
-                                
-                                # Add an interpretation
-                                st.markdown("""
-                                ### Weekly pattern analysis
-                                
-                                This chart shows how seismic events are distributed throughout the week.
-                                Significant patterns might indicate:
-                                
-                                - Possible influence of human activities (e.g., controlled explosions on weekdays)
-                                - Trends that deserve additional investigation
-                                - Note that in natural phenomena, weekly patterns are generally not expected
-                                """)
-                                
-                                # Create a heatmap of activity by day of the week and week of the month
-                                st.subheader("Heat Map: Activity by Week and Day")
-                                
-                                # Add a relative week number column within the period
-                                filtered_df['week_num'] = filtered_df['time'].dt.isocalendar().week
-                                min_week = filtered_df['week_num'].min()
-                                filtered_df['rel_week'] = filtered_df['week_num'] - min_week + 1
-                                
-                                # Group by relative week and day of the week
-                                heatmap_weekly = filtered_df.groupby(['rel_week', 'day_name']).size().reset_index(name='count')
-                                
-                                # Pivot to create the format for the heatmap
-                                pivot_weekly = pd.pivot_table(
-                                    heatmap_weekly, 
-                                    values='count', 
-                                    index='day_name', 
-                                    columns='rel_week',
-                                    fill_value=0
-                                )
-                                
-                                # Reorder the days
-                                if set(ordered_days).issubset(set(pivot_weekly.index)):
-                                    pivot_weekly = pivot_weekly.reindex(ordered_days)
-                                
-                                # Create heatmap
-                                fig_weekly_heat = px.imshow(
-                                    pivot_weekly,
-                                    labels=dict(x="Week", y="Day of the Week", color="Number of Events"),
-                                    x=[f"Week {i}" for i in pivot_weekly.columns],
-                                    y=pivot_weekly.index,
-                                    color_continuous_scale="YlOrRd",
-                                    title="Heat Map: Seismic Activity by Week and Day"
-                                )
-                                
-                                st.plotly_chart(fig_weekly_heat, use_container_width=True)
-                            except Exception as e:
-                                st.error(f"Error in weekly pattern analysis: {e}")
+                        # Translate days of the week
+                        if 'day_of_week' in weekly_df.columns:
+                            weekly_df['day_name'] = weekly_df['day_of_week'].map(days_translation)
+                        elif 'time' in weekly_df.columns:
+                            weekly_df['day_name'] = weekly_df['time'].dt.day_name().map(days_translation)
+                        else:
+                            st.warning("Missing required columns for weekly analysis")
+                            pass
                         
-                        # Tab 3: Hourly Patterns
-                        with temp_tab3:
-                            try:
-                                st.subheader("Events Distribution by Hour of Day")
+                        # Sort days of the week correctly
+                        days_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+                        ordered_days = [days_translation[day] for day in days_order]
+                        
+                        # Group by day of the week
+                        dow_data = weekly_df.groupby('day_name').agg({
+                            'id': 'count',
+                            'mag': ['mean', 'max']
+                        }).reset_index()
+                        
+                        # Rename columns
+                        dow_data.columns = ['Day', 'Count', 'Average Magnitude', 'Maximum Magnitude']
+                        
+                        # Order days
+                        dow_data['Day_ordered'] = pd.Categorical(dow_data['Day'], categories=ordered_days, ordered=True)
+                        dow_data = dow_data.sort_values('Day_ordered')
+                        
+                        # Create chart
+                        fig_dow = px.bar(
+                            dow_data,
+                            x='Day',
+                            y='Count',
+                            color='Average Magnitude',
+                            text='Count',
+                           
+                            color_continuous_scale='Viridis',
+                            labels={'Count': 'Number of Events', 'Average Magnitude': 'Average Magnitude'}
+                        )
+                        
+                        fig_dow.update_traces(textposition='outside')
+                        fig_dow.update_layout(height=400)
+                        
+                        st.plotly_chart(fig_dow, use_container_width=True)
+                        
+                        # Add weekly heatmap
+                        st.subheader("Heat Map: Activity by Week and Day")
+                        
+                        # Add a relative week number column within the period
+                        if 'time' in weekly_df.columns:
+                            weekly_df['week_num'] = weekly_df['time'].dt.isocalendar().week
+                            min_week = weekly_df['week_num'].min()
+                            weekly_df['rel_week'] = weekly_df['week_num'] - min_week + 1
+                            
+                            # Group by relative week and day of the week
+                            heatmap_weekly = weekly_df.groupby(['rel_week', 'day_name']).size().reset_index(name='count')
+                            
+                            # Pivot to create the format for the heatmap
+                            pivot_weekly = pd.pivot_table(
+                                heatmap_weekly, 
+                                values='count', 
+                                index='day_name', 
+                                columns='rel_week',
+                                fill_value=0
+                            )
+                            
+                            # Reorder the days
+                            if set(ordered_days).issubset(set(pivot_weekly.index)):
+                                pivot_weekly = pivot_weekly.reindex(ordered_days)
+                            
+                            # Create heatmap
+                            fig_weekly_heat = px.imshow(
+                                pivot_weekly,
+                                labels=dict(x="Week", y="Day of the Week", color="Number of Events"),
+                                x=[f"Week {i}" for i in pivot_weekly.columns],
+                                y=pivot_weekly.index,
+                                color_continuous_scale="YlOrRd",
+                               
+                            )
+                            
+                            st.plotly_chart(fig_weekly_heat, use_container_width=True)
+                        else:
+                            st.warning("Cannot create weekly heatmap: missing time column")
+                    except Exception as e:
+                        st.error(f"Error in weekly pattern analysis: {e}")
+
+                # Tab 3: Hourly Patterns
+                with temp_tab3:
+                    try:
+                        # Usar copia local para este subtab
+                        hourly_df = temporal_df.copy()
+                        
+                        if 'hour' not in hourly_df.columns and 'time' in hourly_df.columns:
+                            hourly_df['hour'] = hourly_df['time'].dt.hour
+                        
+                        if 'hour' not in hourly_df.columns:
+                            st.warning("Missing hour data for hourly analysis")
+                        else:
+                            st.subheader("Events Distribution by Hour of Day")
+                            
+                            # Group by hour
+                            hourly_counts = hourly_df.groupby('hour').agg({
+                                'id': 'count',
+                                'mag': ['mean', 'max']
+                            }).reset_index()
+                            
+                            # Rename columns
+                            hourly_counts.columns = ['Hour', 'Count', 'Average Magnitude', 'Maximum Magnitude']
+                            
+                            # Create bar chart for distribution by hour
+                            fig_hourly = px.bar(
+                                hourly_counts,
+                                x='Hour',
+                                y='Count',
+                                color='Average Magnitude',
                                 
-                                # Group by hour
-                                hourly_counts = filtered_df.groupby('hour').agg({
-                                    'id': 'count',
-                                    'mag': ['mean', 'max']
-                                }).reset_index()
+                                labels={"Hour": "Hour of day (UTC)", "Count": "Number of events"},
+                                color_continuous_scale='Viridis',
+                                text='Count'
+                            )
+                            
+                            fig_hourly.update_traces(textposition='outside')
+                            fig_hourly.update_layout(height=400)
+                            
+                            st.plotly_chart(fig_hourly, use_container_width=True)
+                            
+                            # Heatmap by hour and day of the week
+                            if 'day_of_week' in hourly_df.columns or 'time' in hourly_df.columns:
+                                if 'day_name' not in hourly_df.columns:
+                                    if 'day_of_week' in hourly_df.columns:
+                                        hourly_df['day_name'] = hourly_df['day_of_week'].map(days_translation)
+                                    else:
+                                        hourly_df['day_name'] = hourly_df['time'].dt.day_name().map(days_translation)
                                 
-                                # Rename columns
-                                hourly_counts.columns = ['Hour', 'Count', 'Average Magnitude', 'Maximum Magnitude']
-                                
-                                # Create bar chart for distribution by hour
-                                fig_hourly = px.bar(
-                                    hourly_counts,
-                                    x='Hour',
-                                    y='Count',
-                                    color='Average Magnitude',
-                                    title="Distribution of seismic events by hour of day",
-                                    labels={"Hour": "Hour of day (UTC)", "Count": "Number of events"},
-                                    color_continuous_scale='Viridis',
-                                    text='Count'
-                                )
-                                
-                                fig_hourly.update_traces(textposition='outside')
-                                fig_hourly.update_layout(height=400)
-                                
-                                st.plotly_chart(fig_hourly, use_container_width=True)
-                                
-                                # Heatmap by hour and day of the week
                                 st.subheader("Heat Map: Activity by Hour and Day of the Week")
                                 
-                                # Ensure 'day_name' exists
-                                if 'day_name' not in filtered_df.columns:
-                                    filtered_df['day_name'] = filtered_df['day_of_week'].map(days_translation)
-                                
                                 # Group by hour and day of the week
-                                heatmap_data = filtered_df.groupby(['day_name', 'hour']).size().reset_index(name='count')
+                                heatmap_data = hourly_df.groupby(['day_name', 'hour']).size().reset_index(name='count')
                                 
                                 # Pivot to create the format for the heatmap
                                 pivot_data = pd.pivot_table(
@@ -2420,6 +2547,7 @@ if df is not None and not df.empty:
                                 )
                                 
                                 # Reorder the days
+                                days_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
                                 ordered_days = [days_translation[day] for day in days_order]
                                 if set(ordered_days).issubset(set(pivot_data.index)):
                                     pivot_data = pivot_data.reindex(ordered_days)
@@ -2431,7 +2559,7 @@ if df is not None and not df.empty:
                                     x=[f"{h}:00" for h in range(24)],
                                     y=pivot_data.index,
                                     color_continuous_scale="YlOrRd",
-                                    title="Heat Map: Seismic Activity by Hour and Day of the Week"
+                                   
                                 )
                                 
                                 st.plotly_chart(fig_heatmap, use_container_width=True)
@@ -2446,108 +2574,82 @@ if df is not None and not df.empty:
                                 - Vertical patterns indicate days of the week with more events
                                 - Isolated intense color cells may indicate special events or temporal clusters
                                 """)
-                            except Exception as e:
-                                st.error(f"Error in hourly pattern analysis: {e}")
-                adv_tab1, adv_tab2, adv_tab3 = st.tabs([
-                    "Correlations", 
-                    "Magnitude by Region", 
-                    "Comparisons"
-                ])
-                
-                # Tab 1: Correlations
-                with adv_tab1:
-                    try:
-                        st.subheader("Correlation Matrix")
-                        
-                        # Select variables for correlation
-                        corr_cols = ['mag', 'depth', 'rms', 'gap', 'horizontalError', 'depthError']
-                        
-                        # Filter columns that exist in the DataFrame
-                        valid_cols = [col for col in corr_cols if col in filtered_df.columns]
-                        
-                        if len(valid_cols) > 1:
-                            corr_df = filtered_df[valid_cols].dropna()
-                            
-                            if len(corr_df) > 1:  # Ensure there's enough data for correlation
-                                corr_matrix = corr_df.corr()
-                                
-                                fig_corr = px.imshow(
-                                    corr_matrix,
-                                    text_auto=True,
-                                    color_continuous_scale="RdBu_r",
-                                    title="Correlation Matrix",
-                                    aspect="auto"
-                                )
-                                
-                                st.plotly_chart(fig_corr, use_container_width=True)
-                                
-                                st.markdown("""
-                                **Correlation matrix interpretation:**
-                                - Values close to 1 indicate strong positive correlation
-                                - Values close to -1 indicate strong negative correlation
-                                - Values close to 0 indicate little or no correlation
-                                """)
-                                
-                                # Add detailed correlation analysis
-                                st.subheader("Detailed Correlation Analysis")
-                                
-                                # Find significant correlations
-                                significant_corr = []
-                                for i in range(len(valid_cols)):
-                                    for j in range(i+1, len(valid_cols)):
-                                        corr_val = corr_matrix.iloc[i, j]
-                                        if abs(corr_val) > 0.3:  # Threshold for significant correlation
-                                            significant_corr.append({
-                                                'Variables': f"{valid_cols[i]} vs {valid_cols[j]}",
-                                                'Correlation': corr_val,
-                                                'Strength': 'Strong' if abs(corr_val) > 0.7 else 'Moderate' if abs(corr_val) > 0.5 else 'Weak',
-                                                'Type': 'Positive' if corr_val > 0 else 'Negative'
-                                            })
-                                
-                                if significant_corr:
-                                    significant_df = pd.DataFrame(significant_corr)
-                                    significant_df = significant_df.sort_values('Correlation', key=abs, ascending=False)
-                                    
-                                    st.dataframe(significant_df, use_container_width=True)
-                                    
-                                    # Visualize the strongest correlation
-                                    if len(significant_df) > 0:
-                                        top_corr = significant_df.iloc[0]
-                                        var1, var2 = top_corr['Variables'].split(' vs ')
-                                        
-                                        st.subheader(f"Correlation Visualization: {top_corr['Variables']}")
-                                        
-                                        fig_scatter_corr = px.scatter(
-                                            filtered_df,
-                                            x=var1,
-                                            y=var2,
-                                            color='magnitud_categoria',
-                                            size=ensure_positive(filtered_df['mag']),  # Use guaranteed positive values
-                                            hover_name='place',
-                                            title=f"{top_corr['Type']} {top_corr['Strength']} Correlation (r={top_corr['Correlation']:.2f})",
-                                            color_discrete_map=magnitude_colors
-                                        )
-                                        
-                                        fig_scatter_corr.update_layout(height=500)
-                                        
-                                        st.plotly_chart(fig_scatter_corr, use_container_width=True)
-                                else:
-                                    st.info("No significant correlations found between the analyzed variables.")
                             else:
-                                st.warning("Not enough data to calculate correlations.")
-                        else:
-                            st.warning("Not enough numeric columns to calculate correlations.")
+                                st.warning("Cannot create day-hour heatmap: missing day of week data")
                     except Exception as e:
-                        st.error(f"Error in correlation analysis: {e}")
-                
-                # Tab 2: Magnitude by Region
-                with adv_tab2:
-                    try:
-                        st.subheader("Magnitude Analysis by Region")
+                        st.error(f"Error in hourly pattern analysis: {e}")
+
+        # --- Advanced Analysis Tab ---
+        with main_tabs[3]:
+            # Usar copia local para esta pestaña
+            advanced_df = main_filtered_df.copy()
+                    
+            adv_tab1, adv_tab2, adv_tab3 = st.tabs([
+                "Correlations", 
+                "Magnitude by Region", 
+                "Comparisons",
+            ])
+            
+            # Tab 1: Correlations
+            with adv_tab1:
+                try:
+                    # Usar copia local para este subtab
+                    corr_df = advanced_df.copy()
+                    
+                    st.subheader("Correlation Matrix")
+                    
+                    # Select variables for correlation
+                    corr_cols = ['mag', 'depth', 'rms', 'gap', 'horizontalError', 'depthError']
+                    
+                    # Filter columns that exist in the DataFrame
+                    valid_cols = [col for col in corr_cols if col in corr_df.columns]
+
+                    if len(valid_cols) > 1:
+                        corr_data = corr_df[valid_cols].dropna()
                         
+                        if len(corr_data) > 1:  # Ensure there's enough data for correlation
+                            corr_matrix = corr_data.corr()
+                            
+                            fig_corr = px.imshow(
+                                corr_matrix,
+                                text_auto=True,
+                                color_continuous_scale="RdBu_r",
+                                
+                                aspect="auto"
+                            )
+                            
+                            st.plotly_chart(fig_corr, use_container_width=True)
+                            
+                            st.markdown("""
+                            **Correlation matrix interpretation:**
+                            - Values close to 1 indicate strong positive correlation
+                            - Values close to -1 indicate strong negative correlation
+                            - Values close to 0 indicate little or no correlation
+                            """)
+                        else:
+                            st.warning("Not enough data to calculate correlations.")
+                    else:
+                        st.warning("Not enough numeric columns to calculate correlations.")
+                except Exception as e:
+                    st.error(f"Error in correlation analysis: {e}")
+
+            # Tab 2: Magnitude by Region
+            with adv_tab2:
+                try:
+                    # Usar copia local para este subtab
+                    region_df = advanced_df.copy()
+                    
+                    st.subheader("Magnitude Analysis by Region")
+                    
+                    # Verificar columnas necesarias
+                    if 'place' not in region_df.columns:
+                        st.warning("Missing 'place' column for region analysis")
+                    else:
                         # Extract main regions
-                        filtered_df['region'] = filtered_df['place'].str.split(', ').str[-1]
-                        region_stats = filtered_df.groupby('region').agg({
+                        if 'region' not in region_df.columns:
+                            region_df['region'] = region_df['place'].str.split(', ').str[-1]
+                        
+                        region_stats = region_df.groupby('region').agg({
                             'id': 'count',
                             'mag': ['mean', 'max', 'min'],
                             'depth': 'mean'
@@ -2569,8 +2671,8 @@ if df is not None and not df.empty:
                                 error_y=filtered_regions.head(15)['Maximum Magnitude'] - filtered_regions.head(15)['Average Magnitude'],
                                 color='Count',
                                 hover_data=['Count', 'Maximum Magnitude', 'Average Depth'],
-                                title='Average Magnitude by Region (Top 15)',
-                                color_continuous_scale='Viridis'
+                              
+                                color_continuous_scale=px.colors.sequential.Plasma
                             )
                             
                             fig_regions.update_layout(height=500, xaxis_tickangle=-45)
@@ -2583,315 +2685,23 @@ if df is not None and not df.empty:
                             )
                         else:
                             st.warning(f"No regions with at least {min_events} events. Try reducing the minimum.")
-                    except Exception as e:
-                        st.error(f"Error in magnitude analysis by region: {e}")
-                
-                # Tab 3: Comparisons
-                with adv_tab3:
-                    try:
-                        st.subheader("Comparative Analysis")
-                        
-                        # Available numeric columns
-                        numeric_cols = filtered_df.select_dtypes(include=['number']).columns.tolist()
-                        numeric_cols = [col for col in numeric_cols if col not in ['cluster', 'rel_week', 'week_num']]
-                        
-                        # Select variables to compare
-                        if len(numeric_cols) >= 2:
-                            col1, col2 = st.columns(2)
-                            
-                            with col1:
-                                x_variable = st.selectbox(
-                                    "X Variable",
-                                    options=numeric_cols,
-                                    index=numeric_cols.index('mag') if 'mag' in numeric_cols else 0
-                                )
-                            
-                            with col2:
-                                y_variable = st.selectbox(
-                                    "Y Variable",
-                                    options=numeric_cols,
-                                    index=numeric_cols.index('depth') if 'depth' in numeric_cols else min(1, len(numeric_cols)-1)
-                                )
-                            
-                            # Create custom scatter plot
-                            fig_custom = px.scatter(
-                                filtered_df,
-                                x=x_variable,
-                                y=y_variable,
-                                color='magnitud_categoria',
-                                size=ensure_positive(filtered_df['mag']),  # Positive values
-                                hover_name='place',
-                                title=f"Relationship between {x_variable} and {y_variable}",
-                                color_discrete_map=magnitude_colors,
-                                trendline='ols'  # Add trend line
-                            )
-                            
-                            fig_custom.update_layout(height=500)
-                            st.plotly_chart(fig_custom, use_container_width=True)
-                            
-                            # Analysis by category
-                            st.subheader("Statistics by Magnitude Category")
-                            
-                            # Group by magnitude category
-                            cat_stats = filtered_df.groupby('magnitud_categoria').agg({
-                                'id': 'count',
-                                'mag': ['mean', 'std'],
-                                'depth': ['mean', 'std'],
-                                'rms': 'mean'
-                            }).reset_index()
-                            
-                            # Flatten columns
-                            cat_stats.columns = [
-                                'Category', 'Count', 'Average Magnitude', 'Mag Std Dev', 
-                                'Average Depth', 'Depth Std Dev', 'Average RMS'
-                            ]
-                            
-                            # Order categories
-                            cat_order = ['Minor (<2)', 'Light (2-4)', 'Moderate (4-6)', 'Strong (6+)']
-                            cat_stats['Order'] = cat_stats['Category'].map({cat: i for i, cat in enumerate(cat_order)})
-                            cat_stats = cat_stats.sort_values('Order').drop('Order', axis=1)
-                            
-                            # Visualize statistics
-                            st.dataframe(cat_stats, use_container_width=True)
-                            
-                            # Comparative bar chart
-                            fig_cats = go.Figure()
-                            
-                            # Add bars for count
-                            fig_cats.add_trace(go.Bar(
-                                x=cat_stats['Category'],
-                                y=cat_stats['Count'],
-                                name='Count',
-                                marker_color='lightskyblue',
-                                opacity=0.7
-                            ))
-                            
-                            # Add line for average depth
-                            fig_cats.add_trace(go.Scatter(
-                                x=cat_stats['Category'],
-                                y=cat_stats['Average Depth'],
-                                name='Average Depth (km)',
-                                mode='lines+markers',
-                                marker=dict(color='darkred', size=8),
-                                line=dict(width=2),
-                                yaxis='y2'
-                            ))
-                            
-                            # Configure axes and layout
-                            fig_cats.update_layout(
-                                title='Comparison of Count and Depth by Category',
-                                xaxis=dict(title='Magnitude Category'),
-                                yaxis=dict(title='Number of Events', side='left'),
-                                yaxis2=dict(
-                                    title='Average Depth (km)',
-                                    side='right',
-                                    overlaying='y'
-                                ),
-                                legend=dict(x=0.01, y=0.99),
-                                barmode='group',
-                                height=400
-                            )
-                            
-                            st.plotly_chart(fig_cats, use_container_width=True)
-                        else:
-                            st.warning("Not enough numeric columns to perform comparative analysis.")
-                    except Exception as e:
-                        st.error(f"Error in comparative analysis: {e}")
-            
-            # Data table (expandable)
-            with st.expander("View data in tabular format"):
-                try:
-                    # Available columns to display
-                    display_cols = [col for col in ['time', 'place', 'mag', 'depth', 'type', 'magType', 'rms'] if col in filtered_df.columns]
-                    
-                    # Sort options
-                    sort_col = st.selectbox(
-                        "Sort by",
-                        options=display_cols,
-                        index=0,
-                        key="sort_colums"
-                    )
-                    
-                    sort_order = st.radio(
-                        "Order",
-                        options=['Descending', 'Ascending'],
-                        index=0,
-                        horizontal=True
-                    )
-                    
-                    # Sort data
-                    sorted_df = filtered_df.sort_values(
-                        by=sort_col,
-                        ascending=(sort_order == 'Ascending'),
-                        key="sort_data"
-                    )
-                    
-                    # Show table
-                    st.dataframe(
-                        sorted_df[display_cols],
-                        use_container_width=True
-                    )
-                    
-                    # Option to download filtered data
-                    csv = sorted_df.to_csv(index=False).encode('utf-8')
-                    st.download_button(
-                        "Download filtered data (CSV)",
-                        data=csv,
-                        file_name="filtered_earthquake_data.csv",
-                        mime="text/csv",
-                    )
-                except Exception as e:
-                    st.error(f"Error displaying data table: {e}")        
-
-        # --- Advanced Analysis Tab ---
-        with main_tabs[3]:
-            adv_tab1, adv_tab2, adv_tab3 = st.tabs([
-                "Correlations", 
-                "Magnitude by Region", 
-                "Comparisons",
-            ])
-            
-            # Tab 1: Correlations
-            with adv_tab1:
-                try:
-                    st.subheader("Correlation Matrix")
-                    
-                    # Select variables for correlation
-                    corr_cols = ['mag', 'depth', 'rms', 'gap', 'horizontalError', 'depthError']
-                    
-                    # Filter columns that exist in the DataFrame
-                    valid_cols = [col for col in corr_cols if col in filtered_df.columns]
-                    
-                    if len(valid_cols) > 1:
-                        corr_df = filtered_df[valid_cols].dropna()
-                        
-                        if len(corr_df) > 1:  # Ensure there's enough data for correlation
-                            corr_matrix = corr_df.corr()
-                            
-                            fig_corr = px.imshow(
-                                corr_matrix,
-                                text_auto=True,
-                                color_continuous_scale="RdBu_r",
-                                title="Correlation Matrix",
-                                aspect="auto"
-                            )
-                            
-                            st.plotly_chart(fig_corr, use_container_width=True)
-                            
-                            st.markdown("""
-                            **Correlation matrix interpretation:**
-                            - Values close to 1 indicate strong positive correlation
-                            - Values close to -1 indicate strong negative correlation
-                            - Values close to 0 indicate little or no correlation
-                            """)
-                            
-                            # Add detailed correlation analysis
-                            st.subheader("Detailed Correlation Analysis")
-                            
-                            # Find significant correlations
-                            significant_corr = []
-                            for i in range(len(valid_cols)):
-                                for j in range(i+1, len(valid_cols)):
-                                    corr_val = corr_matrix.iloc[i, j]
-                                    if abs(corr_val) > 0.3:  # Threshold for significant correlation
-                                        significant_corr.append({
-                                            'Variables': f"{valid_cols[i]} vs {valid_cols[j]}",
-                                            'Correlation': corr_val,
-                                            'Strength': 'Strong' if abs(corr_val) > 0.7 else 'Moderate' if abs(corr_val) > 0.5 else 'Weak',
-                                            'Type': 'Positive' if corr_val > 0 else 'Negative'
-                                        })
-                            
-                            if significant_corr:
-                                significant_df = pd.DataFrame(significant_corr)
-                                significant_df = significant_df.sort_values('Correlation', key=abs, ascending=False)
-                                
-                                st.dataframe(significant_df, use_container_width=True)
-                                
-                                # Visualize the strongest correlation
-                                if len(significant_df) > 0:
-                                    top_corr = significant_df.iloc[0]
-                                    var1, var2 = top_corr['Variables'].split(' vs ')
-                                    
-                                    st.subheader(f"Correlation Visualization: {top_corr['Variables']}")
-                                    
-                                    fig_scatter_corr = px.scatter(
-                                        filtered_df,
-                                        x=var1,
-                                        y=var2,
-                                        color='magnitud_categoria',
-                                        size=ensure_positive(filtered_df['mag']),  # Use guaranteed positive values
-                                        hover_name='place',
-                                        title=f"{top_corr['Type']} {top_corr['Strength']} Correlation (r={top_corr['Correlation']:.2f})",
-                                        color_discrete_map=magnitude_colors
-                                    )
-                                    
-                                    fig_scatter_corr.update_layout(height=500)
-                                    
-                                    st.plotly_chart(fig_scatter_corr, use_container_width=True)
-                            else:
-                                st.info("No significant correlations found between the analyzed variables.")
-                        else:
-                            st.warning("Not enough data to calculate correlations.")
-                    else:
-                        st.warning("Not enough numeric columns to calculate correlations.")
-                except Exception as e:
-                    st.error(f"Error in correlation analysis: {e}")
-            
-            # Tab 2: Magnitude by Region
-            with adv_tab2:
-                try:
-                    st.subheader("Magnitude Analysis by Region")
-                    
-                    # Extract main regions
-                    filtered_df['region'] = filtered_df['place'].str.split(', ').str[-1]
-                    region_stats = filtered_df.groupby('region').agg({
-                        'id': 'count',
-                        'mag': ['mean', 'max', 'min'],
-                        'depth': 'mean'
-                    }).reset_index()
-                    
-                    # Flatten multilevel columns
-                    region_stats.columns = ['Region', 'Count', 'Average Magnitude', 'Maximum Magnitude', 'Minimum Magnitude', 'Average Depth']
-                    
-                    # Filter regions with enough events
-                    min_events = st.slider("Minimum events per region", 1, 50, 5)
-                    filtered_regions = region_stats[region_stats['Count'] >= min_events].sort_values('Average Magnitude', ascending=False)
-                    
-                    # Visualize
-                    if not filtered_regions.empty:
-                        fig_regions = px.bar(
-                            filtered_regions.head(15),  # Top 15 regions
-                            x='Region',
-                            y='Average Magnitude',
-                            error_y=filtered_regions.head(15)['Maximum Magnitude'] - filtered_regions.head(15)['Average Magnitude'],
-                            color='Count',
-                            hover_data=['Count', 'Maximum Magnitude', 'Average Depth'],
-                            title='Average Magnitude by Region (Top 15)',
-                            color_continuous_scale='Viridis'
-                        )
-                        
-                        fig_regions.update_layout(height=500, xaxis_tickangle=-45)
-                        st.plotly_chart(fig_regions, use_container_width=True)
-                        
-                        # Show detailed table
-                        st.dataframe(
-                            filtered_regions.sort_values('Count', ascending=False),
-                            use_container_width=True
-                        )
-                    else:
-                        st.warning(f"No regions with at least {min_events} events. Try reducing the minimum.")
                 except Exception as e:
                     st.error(f"Error in magnitude analysis by region: {e}")
             
             # Tab 3: Comparisons
             with adv_tab3:
-
                 try:
+                    # Usar copia local para este subtab
+                    compare_df = advanced_df.copy()
+                    
                     st.subheader("Comparative Analysis")
                     
                     # Available numeric columns
-                    numeric_cols = filtered_df.select_dtypes(include=['number']).columns.tolist()
-                    numeric_cols = [col for col in numeric_cols if col not in ['cluster', 'rel_week', 'week_num']]
+                    numeric_cols = compare_df.select_dtypes(include=['number']).columns.tolist()
+                    
+                    # Filtrar columnas que no queremos usar para comparación
+                    exclude_cols = ['cluster', 'rel_week', 'week_num', 'id']
+                    numeric_cols = [col for col in numeric_cols if col not in exclude_cols]
                     
                     # Select variables to compare
                     if len(numeric_cols) >= 2:
@@ -2905,238 +2715,96 @@ if df is not None and not df.empty:
                             )
                         
                         with col2:
+                            y_options = [col for col in numeric_cols if col != x_variable]
+                            y_default = 'depth' if 'depth' in y_options else y_options[0]
                             y_variable = st.selectbox(
                                 "Y Variable",
-                                options=numeric_cols,
-                                index=numeric_cols.index('depth') if 'depth' in numeric_cols else min(1, len(numeric_cols)-1)
+                                options=y_options,
+                                index=y_options.index(y_default) if y_default in y_options else 0
                             )
                         
-                        # Create custom scatter plot
-                        fig_custom = px.scatter(
-                            filtered_df,
-                            x=x_variable,
-                            y=y_variable,
-                            color='magnitud_categoria',
-                            size=ensure_positive(filtered_df['mag']),  # Positive values
-                            hover_name='place',
-                            title=f"Relationship between {x_variable} and {y_variable}",
-                            color_discrete_map=magnitude_colors,
-                            trendline='ols'  # Add trend line
-                        )
+                        # Category column for color
+                        if 'magnitud_categoria' not in compare_df.columns and 'mag' in compare_df.columns:
+                            conditions = [
+                                (compare_df['mag'] < 2.0),
+                                (compare_df['mag'] >= 2.0) & (compare_df['mag'] < 4.0),
+                                (compare_df['mag'] >= 4.0) & (compare_df['mag'] < 6.0),
+                                (compare_df['mag'] >= 6.0)
+                            ]
+                            choices = ['Minor (<2)', 'Light (2-4)', 'Moderate (4-6)', 'Strong (6+)']
+                            compare_df['magnitud_categoria'] = np.select(conditions, choices, default='Not classified')
                         
-                        fig_custom.update_layout(height=500)
+                        # Create scatter plot
+                        if 'magnitud_categoria' in compare_df.columns:
+                            # Con categoría de magnitud
+                            fig_custom = px.scatter(
+                                compare_df,
+                                x=x_variable,
+                                y=y_variable,
+                                color='magnitud_categoria',
+                                size=ensure_positive(compare_df['mag']) if 'mag' in compare_df.columns else None,
+                                hover_name='place' if 'place' in compare_df.columns else None,
+                                title=f"Relationship between {x_variable} and {y_variable}",
+                                color_discrete_map=magnitude_colors if 'magnitude_colors' in globals() else None
+                            )
+                        else:
+                            # Sin categoría de magnitud
+                            fig_custom = px.scatter(
+                                compare_df,
+                                x=x_variable,
+                                y=y_variable,
+                                color=x_variable,
+                                size='mag' if 'mag' in compare_df.columns else None,
+                                hover_name='place' if 'place' in compare_df.columns else None,
+                                title=f"Relationship between {x_variable} and {y_variable}"
+                            )
+                        
                         st.plotly_chart(fig_custom, use_container_width=True)
                         
-                        # Analysis by category
-                        st.subheader("Statistics by Magnitude Category")
-                        
-                        # Group by magnitude category
-                        cat_stats = filtered_df.groupby('magnitud_categoria').agg({
-                            'id': 'count',
-                            'mag': ['mean', 'std'],
-                            'depth': ['mean', 'std'],
-                            'rms': 'mean'
-                        }).reset_index()
-                        
-                        # Flatten columns
-                        cat_stats.columns = [
-                            'Category', 'Count', 'Average Magnitude', 'Mag Std Dev', 
-                            'Average Depth', 'Depth Std Dev', 'Average RMS'
-                        ]
-                        
-                        # Order categories
-                        cat_order = ['Minor (<2)', 'Light (2-4)', 'Moderate (4-6)', 'Strong (6+)']
-                        cat_stats['Order'] = cat_stats['Category'].map({cat: i for i, cat in enumerate(cat_order)})
-                        cat_stats = cat_stats.sort_values('Order').drop('Order', axis=1)
-                        
-                        # Visualize statistics
-                        st.dataframe(cat_stats, use_container_width=True)
-                        
-                        # Comparative bar chart
-                        fig_cats = go.Figure()
-                        
-                        # Add bars for count
-                        fig_cats.add_trace(go.Bar(
-                            x=cat_stats['Category'],
-                            y=cat_stats['Count'],
-                            name='Count',
-                            marker_color='lightskyblue',
-                            opacity=0.7
-                        ))
-                        
-                        # Add line for average depth
-                        fig_cats.add_trace(go.Scatter(
-                            x=cat_stats['Category'],
-                            y=cat_stats['Average Depth'],
-                            name='Average Depth (km)',
-                            mode='lines+markers',
-                            marker=dict(color='darkred', size=8),
-                            line=dict(width=2),
-                            yaxis='y2'
-                        ))
-                        
-                        # Configure axes and layout
-                        fig_cats.update_layout(
-                            title='Comparison of Count and Depth by Category',
-                            xaxis=dict(title='Magnitude Category'),
-                            yaxis=dict(title='Number of Events', side='left'),
-                            yaxis2=dict(
-                                title='Average Depth (km)',
-                                side='right',
-                                overlaying='y'
-                            ),
-                            legend=dict(x=0.01, y=0.99),
-                            barmode='group',
-                            height=400
-                        )
-                        
-                        st.plotly_chart(fig_cats, use_container_width=True)
+                        # Añadir análisis de regresión si hay suficientes datos
+                        if len(compare_df) >= 10:
+                            st.subheader("Regression Analysis")
+                            
+                            # Calcular regresión
+                            x = compare_df[x_variable].values.reshape(-1, 1)
+                            y = compare_df[y_variable].values
+                            
+                            from sklearn.linear_model import LinearRegression
+                            model = LinearRegression()
+                            model.fit(x, y)
+                            
+                            # Mostrar resultados
+                            r_squared = model.score(x, y)
+                            slope = model.coef_[0]
+                            intercept = model.intercept_
+                            
+                            st.write(f"R² (coefficient of determination): {r_squared:.4f}")
+                            st.write(f"Equation: {y_variable} = {slope:.4f} × {x_variable} + {intercept:.4f}")
+                            
+                            # Añadir línea de tendencia al gráfico
+                            trend_x = np.array([min(compare_df[x_variable]), max(compare_df[x_variable])])
+                            trend_y = model.predict(trend_x.reshape(-1, 1))
+                            
+                            fig_custom.add_trace(
+                                go.Scatter(
+                                    x=trend_x, 
+                                    y=trend_y,
+                                    mode='lines',
+                                    name='Trend Line',
+                                    line=dict(color='red', width=2, dash='dash')
+                                )
+                            )
+                            
+                            st.plotly_chart(fig_custom, use_container_width=True)
                     else:
                         st.warning("Not enough numeric columns to perform comparative analysis.")
                 except Exception as e:
                     st.error(f"Error in comparative analysis: {e}")
 
-
-                try:
-                    st.subheader("Depth vs Magnitude Analysis")
-                    
-                    # Create a more effective visualization
-                    heatmap_df = filtered_df.copy()
-                    heatmap_df = heatmap_df[(heatmap_df['mag'] > 0) & (heatmap_df['depth'] > 0)]
-                    
-                    # Add visualization options
-                    viz_type = st.radio(
-                        "Select visualization type:",
-                        ["Scatter plot", "3D distribution"],
-                        horizontal=True
-                    )
-                    
-                    if viz_type == "Scatter plot":
-                        fig = px.scatter(
-                            heatmap_df,
-                            x="mag",
-                            y="depth",
-                            color="magnitud_categoria",
-                            size=ensure_positive(heatmap_df['mag'], min_size=4),
-                            color_discrete_map=magnitude_colors,
-                            opacity=0.7,
-                            hover_data=["place", "time"],
-                            labels={"mag": "Magnitude", "depth": "Depth (km)"},
-                            title="Relationship between Magnitude and Depth"
-                        )
-                        fig.update_yaxes(autorange="reversed")  # Depth increases downward
-                    
-                    elif viz_type == "3D distribution":
-                        # Add region as a third dimension
-                        fig = px.scatter_3d(
-                            heatmap_df,
-                            x="mag",
-                            y="depth",
-                            z="time",
-                            color="magnitud_categoria",
-                            size=ensure_positive(heatmap_df['mag'], min_size=3),
-                            color_discrete_map=magnitude_colors,
-                            opacity=0.7,
-                            hover_data=["place"],
-                            labels={"mag": "Magnitude", "depth": "Depth (km)", "time": "Date/Time"},
-                            title="3D View: Magnitude, Depth and Time"
-                        )
-                    
-                    # Make the plot larger for better visibility
-                    fig.update_layout(height=600, width=800)
-                    st.plotly_chart(fig, use_container_width=True)
-                    
-                    # Add statistical insight
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.subheader("Statistical Summary")
-                        depth_mag_corr = heatmap_df[['depth', 'mag']].corr().iloc[0,1]
-                        st.metric(
-                            "Correlation between Depth and Magnitude", 
-                            f"{depth_mag_corr:.3f}",
-                            delta=f"{depth_mag_corr:.3f}" if depth_mag_corr > 0 else f"{depth_mag_corr:.3f}"
-                        )
-                    
-                    with col2:
-                        st.subheader("Distribution by Depth Range")
-                        # Create depth ranges from 0 to 200 km in steps of 20km
-                        depth_ranges = [(0, 20), (20, 40), (40, 60), (60, 80), (80, 100), 
-                                       (100, 120), (120, 140), (140, 160), (160, 180), (180, 200), (200, float('inf'))]
-                        depth_labels = ['0-20km', '20-40km', '40-60km', '60-80km', '80-100km', 
-                                      '100-120km', '120-140km', '140-160km', '160-180km', '180-200km', '>200km']
-                        
-                        # Categorize events by depth
-                        heatmap_df['depth_category'] = pd.cut(
-                            heatmap_df['depth'], 
-                            bins=[r[0] for r in depth_ranges] + [float('inf')],
-                            labels=depth_labels
-                        )
-                        
-                        # Show distribution
-                        depth_counts = heatmap_df['depth_category'].value_counts().reset_index()
-                        depth_counts.columns = ['Depth Range', 'Count']
-                        st.dataframe(depth_counts, use_container_width=True)
-                        
-                except Exception as e:
-                    st.error(f"Error in depth vs. magnitude analysis: {e}")
-
+        # --- Multi-Source Alert Center Tab ---
         with main_tabs[4]:
             st.markdown("## 🚨 Multi-Source Alert Center")
             st.info("Este módulo verifica múltiples fuentes de datos sobre alertas sísmicas recientes y notifica sobre eventos significativos.")
-            
-            # Función para reproducir sonido de alerta
-            def play_alarm_sound():
-                """
-                Play an alarm sound using HTML5 audio with proper error handling
-                to prevent WebSocket connection issues.
-                """
-                try:
-                    # Path to the audio file - make sure it exists!
-                    sound_file = "data/alarm.wav"  # Better to store in data folder
-                    
-                    # Create HTML with proper error handling
-                    sound_html = f"""
-                    <script>
-                    // Use try-catch to handle audio errors properly
-                    try {{
-                        const audio = new Audio('{sound_file}');
-                        audio.volume = 0.7;  // 70% volume
-                        
-                        // Handle errors properly
-                        audio.onerror = function(e) {{
-                            console.error('Audio error:', e);
-                        }};
-                        
-                        // Only play if user has interacted with page (browser policy)
-                        if (document.hasFocus()) {{
-                            var playPromise = audio.play();
-                            
-                            // Handle promise rejection (common in some browsers)
-                            if (playPromise !== undefined) {{
-                                playPromise.catch(function(error) {{
-                                    console.error('Play promise error:', error);
-                                }});
-                            }}
-                        }}
-                    }} catch (e) {{
-                        console.error('Audio setup error:', e);
-                    }}
-                    </script>
-                    
-                    <div style="display:none">
-                        <audio id="alert-sound">
-                            <source src="{sound_file}" type="audio/wav">
-                        </audio>
-                    </div>
-                    """
-                    
-                    # Render the HTML/JS safely
-                    st.markdown(sound_html, unsafe_allow_html=True)
-                except Exception as e:
-                    # Log the error but don't crash if sound playing fails
-                    print(f"Error playing alert sound: {e}")
-                    # Avoid displaying errors to users for non-critical feature
-                    pass
             
             # Crear columnas para mostrar diferentes fuentes de alerta
             alert_col1, alert_col2 = st.columns(2)
@@ -3146,50 +2814,54 @@ if df is not None and not df.empty:
                 st.subheader("USGS Significant Events")
                 
                 try:
-                    # Obtener eventos significativos de USGS
+                    # Get significant events from USGS
                     sig_url = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/significant_week.csv"
                     
-                    # Mostrar que estamos cargando
-                    with st.spinner("Verificando alertas USGS..."):
-                        # Intentar cargar los datos
+                    # Show loading indicator
+                    with st.spinner("Verifying USGS alerts..."):
+                        # Try to load data with timeout
                         try:
-                            sig_df = pd.read_csv(sig_url)
+                            timeout_seconds = 10  # Set reasonable timeout
+                            sig_df = pd.read_csv(sig_url, timeout=timeout_seconds)
                             sig_df['time'] = pd.to_datetime(sig_df['time']).dt.tz_localize(None)
                             
-                            # Filtrar eventos de las últimas 24 horas
+                            # Filter events from the last 24 hours
                             last_24h = pd.Timestamp.now() - pd.Timedelta(hours=24)
                             recent_sig = sig_df[sig_df['time'] > last_24h]
                             
-                            # Verificar si hay alertas recientes
+                            # Check if there are recent alerts
                             if not recent_sig.empty:
-                                # Reproducir sonido de alerta si hay eventos significativos recientes
-                                play_alarm_sound()
-                                
-                                # Crear alerta con color basado en magnitud
+                                # Create alert with color and emoji based on magnitude
                                 for _, event in recent_sig.iterrows():
                                     mag = event['mag']
                                     place = event['place']
                                     event_time = event['time']
                                     
-                                    # Color basado en magnitud
-                                    if mag >= 7.0:
-                                        st.error(f"⚠️ ALERTA CRÍTICA: Magnitud {mag:.1f} en {place} ({event_time})")
-                                    elif mag >= 6.0:
-                                        st.warning(f"⚠️ ALERTA ALTA: Magnitud {mag:.1f} en {place} ({event_time})")
+                                    # Color and emoji based on magnitude
+                                    if (mag >= 7.0):
+                                        st.error(f"🔴 ⚠️ CRITICAL ALERT: Magnitude {mag:.1f} in {place} ({event_time})")
+                                    elif (mag >= 6.0):
+                                        st.warning(f"🟠 ⚠️ HIGH ALERT: Magnitude {mag:.1f} in {place} ({event_time})")
                                     else:
-                                        st.info(f"ℹ️ ALERTA: Magnitud {mag:.1f} en {place} ({event_time})")
+                                        st.info(f"🔵 ℹ️ ALERT: Magnitude {mag:.1f} in {place} ({event_time})")
                                 
-                                # Mostrar tabla de eventos significativos recientes
+                                # Show table of recent significant events
                                 st.dataframe(
                                     recent_sig[['time', 'place', 'mag', 'depth', 'type']],
                                     use_container_width=True
                                 )
                             else:
-                                st.success("✓ No hay alertas significativas de USGS en las últimas 24 horas")
+                                st.success("✓ No significant USGS alerts in the last 24 hours")
+                        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                            st.warning(f"Could not connect to USGS API: {e}. Check your internet connection.")
+                            # Provide fallback information
+                            st.info("You can check alerts manually at: https://earthquake.usgs.gov/earthquakes/map/")
                         except Exception as e:
-                            st.error(f"Error al cargar alertas de USGS: {e}")
+                            st.error(f"Error processing USGS data: {e}")
+                            # Provide a fallback
+                            st.info("Unable to load recent earthquake alerts. Try refreshing the page or check USGS website directly.")
                 except Exception as e:
-                    st.error(f"Error en fuente USGS: {e}")
+                    st.error(f"Error in USGS source: {e}")
             
             # Segunda fuente - EMSC (Centro Sismológico Euro-Mediterráneo)
             with alert_col2:
@@ -3219,7 +2891,7 @@ if df is not None and not df.empty:
                 "Nivel de Alerta": ["Baja", "Media", "Alta", "Crítica"],
                 "Magnitud": ["< 5.0", "5.0 - 5.9", "6.0 - 6.9", "≥ 7.0"],
                 "Notificación": ["Informativa", "Advertencia", "Alerta", "Emergencia"],
-                "Sonido": ["No", "No", "Sí", "Sí"]
+                "Indicador Visual": ["🔵", "🟡", "🟠", "🔴"]
             }
             alert_df = pd.DataFrame(alert_data)
             
@@ -3249,18 +2921,14 @@ if df is not None and not df.empty:
                 > **Nota**: Este panel muestra alertas históricos y no proporciona alertas en tiempo real para emergencias.
                 """)
 
+        # --- Historical Earthquake Analysis Tab ---
         with main_tabs[5]:
             st.title("Historical Earthquake Analysis (2005-2025)")
-            st.markdown("""
-            This analysis examines significant earthquakes (magnitude > 5.5) from 2005-2025, identifying patterns, 
-            trends and potential predictive indicators for future seismic activity.
-            """)
             
-            # Load historical data
-            @st.cache_data(ttl=3600)
+            # Load historical data - dataset completamente independiente
+            @st.cache_data(ttl=3600, show_spinner=False)
             def load_historical_data():
                 try:
-                    # Try to load from the CSV file first
                     df_historic = pd.read_csv('data/2005-2025_mas_de_5_5_E_R.csv')
                     df_historic['time'] = pd.to_datetime(df_historic['time'])
                     return df_historic
@@ -3268,214 +2936,232 @@ if df is not None and not df.empty:
                     st.error(f"Error loading historical data: {e}")
                     return None
             
-            with st.spinner("Loading historical earthquake data..."):
-                historic_eq = load_historical_data()
+            # Procesar datos históricos sin afectar al dataframe principal
+            @st.cache_data(ttl=3600, show_spinner=False)
+            def process_historical_data(df_historic):
+                if df_historic is None or df_historic.empty:
+                    return None, None
+
+                # Clonar los datos para evitar modificar el original
+                data_historic = df_historic.copy()
+
+                # Verificar y limpiar datos
+                data_historic = data_historic.dropna(subset=['mag', 'latitude', 'longitude'])
+                data_historic = data_historic.drop_duplicates(subset=['time', 'latitude', 'longitude', 'mag'])
+
+                # Limitar a los 500 terremotos de mayor magnitud
+                data_historic = data_historic.sort_values('mag', ascending=False).head(500).copy()
+
+                # Añadir características basadas en el tiempo
+                data_historic['year'] = data_historic['time'].dt.year
+                data_historic['month'] = data_historic['time'].dt.month
+                data_historic['day'] = data_historic['time'].dt.day
+                data_historic['hour'] = data_historic['time'].dt.hour
+                data_historic['weekday'] = data_historic['time'].dt.day_name()
+                data_historic['decade'] = (data_historic['year'] // 10) * 10
+
+                # Crear categorías de magnitud con colores que coincidan con su aplicación
+                magnitude_ranges = [0, 2.5, 4.0, 5.5, 7.0, 10.0]
+                magnitude_labels = ['Micro (<2.5)', 'Leve (2.5-4.0)', 'Moderado (4.0-5.5)', 'Fuerte (5.5-7.0)', 'Mayor (>7.0)']
+                data_historic['magnitude_category'] = pd.cut(data_historic['mag'], bins=magnitude_ranges, labels=magnitude_labels)
+
+                # Filtrar terremotos importantes
+                major_quakes = data_historic[data_historic['mag'] >= 7.0].copy()
+
+                return data_historic, major_quakes
             
-            if historic_eq is not None:
-                # Process and prepare data for analysis
-                data = historic_eq.copy()
+            # Cargar y procesar datos
+            with st.spinner("Loading historical earthquake data..."):
+                df_historic = load_historical_data()
+            
+            if df_historic is not None:
+                # Procesar datos sin afectar a filtered_df
+                with st.spinner("Processing historical earthquake data..."):
+                    data_historic, major_quakes = process_historical_data(df_historic)
                 
+                # A partir de aquí, trabajar exclusivamente con data_historic y major_quakes
+                # sin hacer referencia a filtered_df en ningún momento
+                
+                # Código para mostrar análisis históricos...
+                # ...
                 # Display loading info
                 col1, col2 = st.columns(2)
                 with col1:
-                    st.info(f"Loaded {len(data)} significant earthquakes (M>5.5) from 2005-2025")
+                    st.info(f"Loaded {len(data_historic)} significant earthquakes (M>5.5) from 2005-2025")
                 with col2:
                     st.warning("⚠️ Historical analysis is based on past events and patterns, not real-time data")
                 
-                # Verify and clean data
-                data = data.dropna(subset=['mag', 'latitude', 'longitude'])
-                duplicates = data.duplicated(subset=['time', 'latitude', 'longitude', 'mag']).sum()
+                # Check for duplicates and inform the user (now handled in the process_historical_data function)
+                duplicates = len(df_historic) - len(data_historic)
                 if duplicates > 0:
-                    data = data.drop_duplicates(subset=['time', 'latitude', 'longitude', 'mag'])
-                    st.warning(f"Removed {duplicates} duplicate entries from the dataset")
-                
-                # Filter major earthquakes
-                major_quakes = data[data['mag'] >= 7.0].copy()
-                
-                # Add time-based features
-                data['year'] = data['time'].dt.year
-                data['month'] = data['time'].dt.month
-                data['day'] = data['time'].dt.day
-                data['hour'] = data['time'].dt.hour
-                data['weekday'] = data['time'].dt.day_name()
-                data['decade'] = (data['year'] // 10) * 10
-                
-                # Create magnitude categories with colors matching your app
-                magnitude_ranges = [0, 2.5, 4.0, 5.5, 7.0, 10.0]
-                magnitude_labels = ['Micro (<2.5)', 'Leve (2.5-4.0)', 'Moderado (4.0-5.5)', 'Fuerte (5.5-7.0)', 'Mayor (>7.0)']
-                data['magnitude_category'] = pd.cut(data['mag'], bins=magnitude_ranges, labels=magnitude_labels)
-                
-                # Define tectonic regions function
-                def categorize_region(lat, lon):
+                    st.warning(f"Removed {duplicates} duplicate or invalid entries from the dataset")
+                    # Define tectonic regions function
+                    def categorize_region(lat, lon):
                     # Pacific Ring of Fire
-                    if ((lon > 120 or lon < -120) and (lat > -60 and lat < 60)):
-                        return "Pacific West" if lon > 120 else "Pacific East"
-                    # Mediterranean-Caucasus
-                    elif ((lat > 30 and lat < 45) and (lon > -10 and lon < 50)):
-                        return "Mediterranean-Caucasus"
-                    # Indonesia-Himalaya Belt
-                    elif ((lat > -10 and lat < 45) and (lon > 70 and lon < 120)):
-                        return "Indonesia-Himalaya"
-                    # Other regions
-                    else:
-                        return "Other Regions"
+                        if ((lon > 120 or lon < -120) and (lat > -60 and lat < 60)):
+                            return "Pacific West" if lon > 120 else "Pacific East"
+                        # Mediterranean-Caucasus
+                        elif ((lat > 30 and lat < 45) and (lon > -10 and lon < 50)):
+                            return "Mediterranean-Caucasus"
+                        # Indonesia-Himalaya Belt
+                        elif ((lat > -10 and lat < 45) and (lon > 70 and lon < 120)):
+                            return "Indonesia-Himalaya"
+                        # Other regions
+                        else:
+                            return "Other Regions"
                 
-                # Apply regional categorizations
-                data['region'] = data.apply(lambda x: categorize_region(x['latitude'], x['longitude']), axis=1)
-                major_quakes['region'] = major_quakes.apply(lambda x: categorize_region(x['latitude'], x['longitude']), axis=1)
+                    # Apply regional categorizations
+                    data_historic['region'] = data_historic.apply(lambda x: categorize_region(x['latitude'], x['longitude']), axis=1)
+                    major_quakes['region'] = major_quakes.apply(lambda x: categorize_region(x['latitude'], x['longitude']), axis=1)
                 
-                # Add tectonic region classification
-                data['tectonic_region'] = data.apply(lambda x: 
+                    # Add tectonic region classification
+                    data_historic['tectonic_region'] = data_historic.apply(lambda x: 
                     'Ring of Fire' if ((x['longitude'] > 120 and x['longitude'] < 180) or 
-                                (x['longitude'] < -120 and x['longitude'] > -180)) and 
-                                (x['latitude'] > -60 and x['latitude'] < 60) else
+                            (x['longitude'] < -120 and x['longitude'] > -180)) and 
+                            (x['latitude'] > -60 and x['latitude'] < 60) else
                     'Alpine-Himalayan Belt' if ((x['latitude'] > 30 and x['latitude'] < 45) and 
-                                            (x['longitude'] > 0 and x['longitude'] < 150)) or 
-                                        ((x['latitude'] > 0 and x['latitude'] < 30) and 
-                                            (x['longitude'] > 60 and x['longitude'] < 120)) else
+                                (x['longitude'] > 0 and x['longitude'] < 150)) or 
+                                ((x['latitude'] > 0 and x['latitude'] < 30) and 
+                                (x['longitude'] > 60 and x['longitude'] < 120)) else
                     'Mid-Atlantic Ridge' if (x['longitude'] > -45 and x['longitude'] < 0) and 
-                                        (x['latitude'] > -60 and x['latitude'] < 80) else
+                                (x['latitude'] > -60 and x['latitude'] < 80) else
                     'Other Tectonic Regions', axis=1)
                 
-                # Add rounded coordinates for hotspot analysis
-                data['lat_rounded'] = round(data['latitude'], 1)
-                data['lon_rounded'] = round(data['longitude'], 1)
+                    # Add rounded coordinates for hotspot analysis
+                    data_historic['lat_rounded'] = round(data_historic['latitude'], 1)
+                    data_historic['lon_rounded'] = round(data_historic['longitude'], 1)
+
+                    # Calculate time between major earthquakes in the same region
+                    if len(major_quakes) > 1:
+                        major_quakes = major_quakes.sort_values(by=['region', 'time'])
+                        major_quakes['years_since_last'] = major_quakes.groupby('region')['time'].diff().dt.total_seconds() / (365.25 * 24 * 60 * 60)
                 
-                # Calculate time between major earthquakes in the same region
-                if len(major_quakes) > 1:
-                    major_quakes = major_quakes.sort_values(by=['region', 'time'])
-                    major_quakes['years_since_last'] = major_quakes.groupby('region')['time'].diff().dt.total_seconds() / (365.25 * 24 * 60 * 60)
-                
-                # Create subtabs within the historical analysis tab
-                hist_tabs = st.tabs([
+                    # Create subtabs within the historical analysis tab
+                    hist_tabs = st.tabs([
                     "📊 Overview", 
                     "🗺️ Global Distribution", 
                     "📈 Time Patterns", 
                     "🌋 Major Events", 
                     "🔮 Recurrence Analysis"
-                ])
+                    ])
                 
-                # Tab 1: Overview
-                with hist_tabs[0]:
-                    st.header("Historical Earthquake Overview")
-                    
-                    # Calculate key metrics
-                    col1, col2, col3, col4 = st.columns(4)
-                    
-                    with col1:
-                        st.metric(
-                            label="Total Earthquakes (>5.5)",
-                            value=f"{len(data):,}",
-                            delta=None
-                        )
+                    # Tab 1: Overview
+                    with hist_tabs[0]:
+                        st.header("Historical Earthquake Overview")
                         
-                    with col2:
-                        st.metric(
-                            label="Average Magnitude",
-                            value=f"{data['mag'].mean():.2f}",
-                            delta=None
-                        )
+                        # Calculate key metrics
+                        col1, col2, col3, col4 = st.columns(4)
                         
-                    with col3:
-                        st.metric(
-                            label="Maximum Magnitude",
-                            value=f"{data['mag'].max():.1f}",
+                        with col1:
+                            st.metric("Total Earthquakes (>5.5)",
+                            value=f"{len(data_historic):,}",
                             delta=None
-                        )
+                            )
                         
-                    with col4:
-                        most_active_year = data['year'].value_counts().idxmax()
-                        st.metric(
-                            label="Most Active Year",
+                        with col2:
+                            st.metric("Average Magnitude",
+                            value=f"{data_historic['mag'].mean():.2f}",
+                            delta=None
+                            )
+                        
+                        with col3:
+                            st.metric("Maximum Magnitude",
+                            value=f"{data_historic['mag'].max():.1f}",
+                            delta=None
+                            )
+                        
+                        with col4:
+                            most_active_year = data_historic['year'].value_counts().idxmax()
+                            st.metric("Most Active Year",
                             value=f"{most_active_year}",
-                            delta=f"{data[data['year']==most_active_year].shape[0]} events"
+                            delta=f"{data_historic[data_historic['year']==most_active_year].shape[0]} events"
+                            )
+                        
+                        # Magnitude distribution
+                        st.subheader("Magnitude Distribution")
+                        fig_mag_dist = px.histogram(
+                            data_historic, 
+                            x="mag", 
+                            nbins=30, 
+                            color="magnitude_category",
+                            color_discrete_sequence=px.colors.sequential.Plasma,
+                           
                         )
-                    
-                    # Magnitude distribution
-                    st.subheader("Magnitude Distribution")
-                    fig_mag_dist = px.histogram(
-                        data, 
-                        x="mag", 
-                        nbins=30, 
-                        color="magnitude_category",
-                        color_discrete_sequence=px.colors.sequential.Plasma,
-                        title="Distribution of Earthquake Magnitudes"
-                    )
-                    fig_mag_dist.add_vline(x=7.0, line_dash="dash", line_color="red", annotation_text="Major (7+)")
-                    st.plotly_chart(fig_mag_dist, use_container_width=True)
-                    
-                    # Tectonic regions
-                    st.subheader("Distribution by Tectonic Region")
-                    region_counts = data['tectonic_region'].value_counts().reset_index()
-                    region_counts.columns = ['Region', 'Count']
-                    
-                    fig_region = px.pie(
-                        region_counts, 
-                        values='Count', 
-                        names='Region',
-                        color_discrete_sequence=px.colors.sequential.Plasma,
-                        hole=0.4
-                    )
-                    fig_region.update_traces(textposition='inside', textinfo='percent+label')
-                    st.plotly_chart(fig_region, use_container_width=True)
-                    
-                    # Yearly trend
-                    st.subheader("Yearly Trend")
-                    yearly_counts = data.groupby('year').size().reset_index(name='count')
-                    
-                    fig_yearly = px.line(
-                        yearly_counts, 
-                        x='year', 
-                        y='count',
-                        markers=True,
-                        line_shape='spline',
-                        title='Significant Earthquakes by Year (2005-2025)',
-                        labels={'year': 'Year', 'count': 'Number of Earthquakes'}
-                    )
-                    
-                    # Add trendline
-                    x = yearly_counts['year']
-                    y = yearly_counts['count']
-                    z = np.polyfit(x, y, 1)
-                    p = np.poly1d(z)
-                    fig_yearly.add_traces(
-                        go.Scatter(
+                        fig_mag_dist.add_vline(x=7.0, line_dash="dash", line_color="red", annotation_text="Major (7+)")
+                        st.plotly_chart(fig_mag_dist, use_container_width=True)
+                        
+                        # Tectonic regions
+                        st.subheader("Distribution by Tectonic Region")
+                        region_counts = data_historic['tectonic_region'].value_counts().reset_index()
+                        region_counts.columns = ['Region', 'Count']
+                        
+                        fig_region = px.pie(
+                            region_counts, 
+                            values='Count', 
+                            names='Region',
+                            color_discrete_sequence=px.colors.sequential.Plasma,
+                            hole=0.4
+                        )
+                        fig_region.update_traces(textposition='inside', textinfo='percent+label')
+                        st.plotly_chart(fig_region, use_container_width=True)
+                        
+                        # Yearly trend
+                        st.subheader("Yearly Trend")
+                        yearly_counts = data_historic.groupby('year').size().reset_index(name='count')
+                        
+                        fig_yearly = px.line(
+                            yearly_counts, 
+                            x='year', 
+                            y='count',
+                            markers=True,
+                            line_shape='spline',
+                           
+                            labels={'year': 'Year', 'count': 'Number of Earthquakes'}
+                        )
+                        
+                        # Add trendline
+                        x = yearly_counts['year']
+                        y = yearly_counts['count']
+                        z = np.polyfit(x, y, 1)
+                        p = np.poly1d(z)
+                        fig_yearly.add_traces(
+                            go.Scatter(
                             x=x,
                             y=p(x),
                             mode='lines',
                             line=dict(color='red', dash='dash'),
                             name='Trend'
+                            )
                         )
-                    )
-                    
-                    st.plotly_chart(fig_yearly, use_container_width=True)
+                        
+                        st.plotly_chart(fig_yearly, use_container_width=True)
                 
-                # Tab 2: Global Distribution
-                with hist_tabs[1]:
-                    st.header("Global Distribution of Significant Earthquakes")
-                    
-                    # Create a modern interactive map
-                    st.markdown("### Earthquake Distribution Map (2005-2025)")
-                    
-                    fig_map = px.scatter_geo(
-                        data,
-                        lat="latitude",
-                        lon="longitude",
-                        color="mag",
-                        size="mag",
-                        hover_name="place",
-                        hover_data=["time", "mag", "depth"],
-                        title="Global Earthquake Distribution (M>5.5, 2005-2025)",
-                        color_continuous_scale=px.colors.sequential.Plasma,
-                        projection="natural earth",
-                        size_max=20
-                    )
-                    
-                    # Highlight the top 5 strongest earthquakes
-                    top_earthquakes = data.nlargest(5, 'mag')
-                    
-                    for _, row in top_earthquakes.iterrows():
-                        fig_map.add_trace(go.Scattergeo(
+                    # Tab 2: Global Distribution
+                    with hist_tabs[1]:
+                        st.header("Global Distribution of Significant Earthquakes")
+                        
+                        # Create a modern interactive map
+                        st.markdown("### Earthquake Distribution Map (2005-2025)")
+                        
+                        fig_map = px.scatter_geo(
+                            data_historic,
+                            lat="latitude",
+                            lon="longitude",
+                            color="mag",
+                            size="mag",
+                            hover_name="place",
+                            hover_data=["time", "mag", "depth"],
+                         
+                            color_continuous_scale=px.colors.sequential.Plasma,
+                            projection="natural earth",
+                            size_max=20
+                        )
+                        
+                        # Highlight the top 5 strongest earthquakes
+                        top_earthquakes = data_historic.nlargest(5, 'mag')
+                        
+                        for _, row in top_earthquakes.iterrows():
+                            fig_map.add_trace(go.Scattergeo(
                             lat=[row['latitude']],
                             lon=[row['longitude']],
                             mode='markers+text',
@@ -3491,12 +3177,12 @@ if df is not None and not df.empty:
                             name=f"M{row['mag']:.1f} - {row['place']}",
                             hovertext=f"Magnitude: {row['mag']}<br>Date: {row['time']}<br>Place: {row['place']}",
                             hoverinfo="text"
-                        ))
-                    
-                    # Update layout for dark theme
-                    fig_map.update_layout(
-                        height=600,
-                        geo=dict(
+                            ))
+                        
+                        # Update layout for dark theme
+                        fig_map.update_layout(
+                            height=600,
+                            geo=dict(
                             showland=True,
                             landcolor="#d2b48c",
                             showocean=True,
@@ -3505,219 +3191,221 @@ if df is not None and not df.empty:
                             countrycolor="white",
                             showcoastlines=True,
                             coastlinecolor="white",
-                            bgcolor="black"
-                        ),
-                        paper_bgcolor="black",
-                        plot_bgcolor="black"
-                    )
-                    
-                    st.plotly_chart(fig_map, use_container_width=True)
-                    
-                    # Heat map of activity
-                    st.subheader("Earthquake Density Heatmap")
-                    st.markdown("This visualization shows the concentration of seismic activity around the world")
-                    
-                    # Create a heat map using density_mapbox
-                    fig_heat = px.density_mapbox(
-                        data,
-                        lat="latitude",
-                        lon="longitude",
-                        z="mag",  # Weight points by magnitude
-                        radius=10,
-                        center=dict(lat=0, lon=0),
-                        zoom=0.5,
-                        mapbox_style="carto-darkmatter",
-                        opacity=0.7,
-                        color_continuous_scale="Plasma"
-                    )
-                    
-                    fig_heat.update_layout(height=500)
-                    st.plotly_chart(fig_heat, use_container_width=True)
-                    
-                    # Cluster analysis
-                    st.subheader("Regional Cluster Analysis")
-                    
-                    # Create a clustered view of earthquake hotspots
-                    cluster_df = data[['latitude', 'longitude']].copy()
-                    scaler = StandardScaler()
-                    cluster_data = scaler.fit_transform(cluster_df)
-                    
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        eps_distance = st.slider(
+                            bgcolor="black",
+                            projection_scale=1
+                            ),
+                            paper_bgcolor="black",
+                            plot_bgcolor="black",
+                            title_font=dict(size=20, color='white')
+                        )
+                        
+                        st.plotly_chart(fig_map, use_container_width=True)
+                        
+                        # Heat map of activity
+                        st.subheader("Earthquake Density Heatmap")
+                        st.markdown("This visualization shows the concentration of seismic activity around the world")
+                        
+                        # Create a heat map using density_mapbox
+                        fig_heat = px.density_mapbox(
+                            data_historic,
+                            lat="latitude",
+                            lon="longitude",
+                            z="mag",  # Weight points by magnitude
+                            radius=10,
+                            center=dict(lat=0, lon=0),
+                            zoom=0.5,
+                            mapbox_style="carto-darkmatter",
+                            
+                            color_continuous_scale='Inferno'
+                        )
+                        
+                        fig_heat.update_layout(height=500)
+                        st.plotly_chart(fig_heat, use_container_width=True)
+                        
+                        # Cluster analysis
+                        st.subheader("Regional Cluster Analysis")
+                        
+                        # Create a clustered view of earthquake hotspots
+                        cluster_df = data_historic[['latitude', 'longitude']].copy()
+                        scaler = StandardScaler()
+                        cluster_data = scaler.fit_transform(cluster_df)
+                        
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            eps_distance = st.slider(
                             "Maximum distance between events (eps)",
                             min_value=0.05,
                             max_value=1.0,
                             value=0.2,
                             step=0.05,
                             key="hist_eps"
-                        )
-                    with col2:
-                        min_samples = st.slider(
+                            )
+                        with col2:
+                            min_samples = st.slider(
                             "Minimum samples per cluster",
                             min_value=2,
                             max_value=20,
                             value=5,
                             step=1,
                             key="hist_min_samples"
-                        )
-                    
-                    with st.spinner("Performing cluster analysis..."):
-                        dbscan = DBSCAN(eps=eps_distance, min_samples=min_samples)
-                        data['cluster'] = dbscan.fit_predict(cluster_data)
-                    
-                    n_clusters = len(set(data['cluster'])) - (1 if -1 in data['cluster'] else 0)
-                    n_noise = list(data['cluster']).count(-1)
-                    
-                    col1, col2 = st.columns(2)
-                    col1.metric("Identified clusters", n_clusters)
-                    col2.metric("Ungrouped events", n_noise)
-                    
-                    # Create cluster names based on regions
-                    cluster_names = {}
-                    for cluster_id in sorted(set(data['cluster'])):
-                        if cluster_id == -1:
-                            cluster_names[cluster_id] = "Ungrouped"
-                        else:
+                            )
+                        
+                        with st.spinner("Performing cluster analysis..."):
+                            dbscan = DBSCAN(eps=eps_distance, min_samples=min_samples)
+                            data_historic['cluster'] = dbscan.fit_predict(cluster_data)
+                        
+                        n_clusters = len(set(data_historic['cluster'])) - (1 if -1 in data_historic['cluster'] else 0)
+                        n_noise = list(data_historic['cluster']).count(-1)
+                        
+                        col1, col2 = st.columns(2)
+                        col1.metric("Identified clusters", n_clusters)
+                        col2.metric("Ungrouped events", n_noise)
+                        
+                        # Create cluster names based on regions
+                        cluster_names = {}
+                        for cluster_id in sorted(set(data_historic['cluster'])):
+                            if cluster_id == -1:
+                                cluster_names[cluster_id] = "Ungrouped"
+                            else:
                             # Get the most common place in this cluster
-                            cluster_df = data[data['cluster'] == cluster_id]
-                            most_common_place = cluster_df['place'].str.split(', ').str[-1].mode().iloc[0]
-                            cluster_names[cluster_id] = f"Cluster {cluster_id}: {most_common_place}"
-                    
-                    data['cluster_name'] = data['cluster'].map(cluster_names)
-                    
-                    # Plot the clusters
-                    fig_cluster = px.scatter_geo(
-                        data,
-                        lat="latitude",
-                        lon="longitude",
-                        color="cluster_name",
-                        size="mag",
-                        hover_name="place",
-                        hover_data=["time", "mag", "depth"],
-                        title=f"Earthquake Clusters (Found {n_clusters} clusters)",
-                        projection="natural earth"
-                    )
-                    
-                    fig_cluster.update_layout(height=600)
-                    st.plotly_chart(fig_cluster, use_container_width=True)
+                                cluster_df = data_historic[data_historic['cluster'] == cluster_id]
+                                most_common_place = cluster_df['place'].str.split(', ').str[-1].mode().iloc[0]
+                                cluster_names[cluster_id] = f"Cluster {cluster_id}: {most_common_place}"
+                        
+                        data_historic['cluster_name'] = data_historic['cluster'].map(cluster_names)
+                        
+                        # Plot the clusters
+                        fig_cluster = px.scatter_geo(
+                            data_historic,
+                            lat="latitude",
+                            lon="longitude",
+                            color="cluster_name",
+                            size="mag",
+                            hover_name="place",
+                            hover_data=["time", "mag", "depth"],
+                            title=f"Earthquake Clusters (Found {n_clusters} clusters)",
+                            projection="natural earth"
+                        )
+                        
+                        fig_cluster.update_layout(height=600)
+                        st.plotly_chart(fig_cluster, use_container_width=True)
                 
-                # Tab 3: Time Patterns
-                with hist_tabs[2]:
-                    st.header("Temporal Patterns in Earthquake Occurrence")
-                    
-                    # Monthly distribution
-                    st.subheader("Monthly Distribution")
-                    monthly_counts = data.groupby('month').size().reset_index(name='count')
-                    month_names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-                    monthly_counts['month_name'] = monthly_counts['month'].apply(lambda x: month_names[x-1])
-                    
-                    fig_monthly = px.bar(
-                        monthly_counts,
-                        x='month_name',
-                        y='count',
-                        color='count',
-                        color_continuous_scale=px.colors.sequential.Plasma,
-                        title="Earthquakes by Month",
-                        labels={'count': 'Number of Events', 'month_name': 'Month'}
-                    )
-                    st.plotly_chart(fig_monthly, use_container_width=True)
-                    
-                    # Hourly distribution
-                    st.subheader("Distribution by Hour of Day")
-                    hourly_counts = data.groupby('hour').size().reset_index(name='count')
-                    
-                    fig_hourly = px.line(
-                        hourly_counts,
-                        x='hour',
-                        y='count',
-                        markers=True,
-                        title="Earthquakes by Hour of Day (UTC)",
-                        labels={'count': 'Number of Events', 'hour': 'Hour of Day (UTC)'}
-                    )
-                    
-                    # Fill area under the line
-                    fig_hourly.update_traces(fill='tozeroy', fillcolor='rgba(128, 0, 128, 0.2)')
-                    st.plotly_chart(fig_hourly, use_container_width=True)
-                    
-                    # Relation between depth and magnitude over time
-                    st.subheader("Depth vs Magnitude Over Time")
-                    
-                    # Create 3D scatter plot
-                    fig_3d = px.scatter_3d(
-                        data.sort_values('time'),
-                        x='time', 
-                        y='depth', 
-                        z='mag',
-                        color='mag',
-                        size='mag',
-                        opacity=0.7,
-                        color_continuous_scale=px.colors.sequential.Plasma,
-                        title="Depth vs Magnitude Over Time",
-                        labels={
+                    # Tab 3: Time Patterns
+                    with hist_tabs[2]:
+                        st.header("Temporal Patterns in Earthquake Occurrence")
+                        
+                        # Monthly distribution
+                        st.subheader("Monthly Distribution")
+                        monthly_counts = data_historic.groupby('month').size().reset_index(name='count')
+                        month_names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+                        monthly_counts['month_name'] = monthly_counts['month'].apply(lambda x: month_names[x-1])
+                        
+                        fig_monthly = px.bar(
+                            monthly_counts,
+                            x='month_name',
+                            y='count',
+                            color='count',
+                            color_continuous_scale=px.colors.sequential.Plasma,
+                            
+                            labels={'count': 'Number of Events', 'month_name': 'Month'}
+                        )
+                        st.plotly_chart(fig_monthly, use_container_width=True)
+                        
+                        # Hourly distribution
+                        st.subheader("Distribution by Hour of Day")
+                        hourly_counts = data_historic.groupby('hour').size().reset_index(name='count')
+                        
+                        fig_hourly = px.line(
+                            hourly_counts,
+                            x='hour',
+                            y='count',
+                            markers=True,
+                           
+                            labels={'count': 'Number of Events', 'hour': 'Hour of Day (UTC)'}
+                        )
+                        
+                        # Fill area under the line
+                        fig_hourly.update_traces(fill='tozeroy', fillcolor='rgba(128, 0, 128, 0.2)')
+                        st.plotly_chart(fig_hourly, use_container_width=True)
+                        
+                        # Relation between depth and magnitude over time
+                        st.subheader("Depth vs Magnitude Over Time")
+                        
+                        # Create 3D scatter plot
+                        fig_3d = px.scatter_3d(
+                            data_historic.sort_values('time'),
+                            x='time', 
+                            y='depth', 
+                            z='mag',
+                            color='mag',
+                            size='mag',
+                            opacity=0.7,
+                            color_continuous_scale=px.colors.sequential.Plasma,
+                           
+                            labels={
                             'time': 'Date',
                             'depth': 'Depth (km)',
                             'mag': 'Magnitude'
-                        }
-                    )
-                    
-                    fig_3d.update_layout(height=700)
-                    st.plotly_chart(fig_3d, use_container_width=True)
-                    
-                    # Magnitude-depth relationship
-                    st.subheader("Relationship Between Magnitude and Depth")
-                    
-                    fig_md = px.scatter(
-                        data,
-                        x='mag',
-                        y='depth',
-                        color='tectonic_region',
-                        size='mag',
-                        title="Magnitude vs Depth by Tectonic Region",
-                        labels={'mag': 'Magnitude', 'depth': 'Depth (km)'}
-                    )
-                    
-                    # Invert y-axis to show depth increasing downward
-                    fig_md.update_yaxes(autorange="reversed")
-                    
-                    # Add trendline
-                    fig_md.update_layout(height=600)
-                    fig_md.update_traces(marker=dict(line=dict(width=1, color='DarkSlateGrey')))
-                    st.plotly_chart(fig_md, use_container_width=True)
+                            }
+                        )
+                        
+                        fig_3d.update_layout(height=700)
+                        st.plotly_chart(fig_3d, use_container_width=True)
+                        
+                        # Magnitude-depth relationship
+                        st.subheader("Relationship Between Magnitude and Depth")
+                        
+                        fig_md = px.scatter(
+                            data_historic,
+                            x='mag',
+                            y='depth',
+                            color='tectonic_region',
+                            size='mag',
+                           
+                            labels={'mag': 'Magnitude', 'depth': 'Depth (km)'}
+                        )
+                        
+                        # Invert y-axis to show depth increasing downward
+                        fig_md.update_yaxes(autorange="reversed")
+                        
+                        # Add trendline
+                        fig_md.update_layout(height=600)
+                        fig_md.update_traces(marker=dict(line=dict(width=1, color='DarkSlateGrey')))
+                        st.plotly_chart(fig_md, use_container_width=True)
                 
-                # Tab 4: Major Events
-                with hist_tabs[3]:
-                    st.header("Analysis of Major Earthquakes (M≥7.0)")
-                    
-                    # Count and basic stats
-                    major_count = len(major_quakes)
-                    
-                    st.metric(
-                        label="Total Major Earthquakes (M≥7.0)",
-                        value=f"{major_count}",
-                        delta=f"{(major_count/len(data)*100):.1f}% of all events"
-                    )
-                    
-                    # Map of major earthquakes
-                    st.subheader("Global Distribution of Major Earthquakes")
-                    
-                    fig_major = px.scatter_geo(
-                        major_quakes,
-                        lat="latitude",
-                        lon="longitude",
-                        color="mag",
-                        size="mag",
-                        hover_name="place",
-                        hover_data=["time", "mag", "depth"],
-                        title="Major Earthquakes (M≥7.0, 2005-2025)",
-                        color_continuous_scale="Viridis",
-                        projection="natural earth",
-                        size_max=25
-                    )
-                    
-                    fig_major.update_layout(
-                        height=600,
-                        geo=dict(
+                    # Tab 4: Major Events
+                    with hist_tabs[3]:
+                        st.header("Analysis of Major Earthquakes (M≥7.0)")
+                        
+                        # Count and basic stats
+                        major_count = len(major_quakes)
+                        
+                        st.metric(
+                            label="Total Major Earthquakes (M≥7.0)",
+                            value=f"{major_count}",
+                            delta=f"{(major_count/len(data_historic)*100):.1f}% of all events"
+                        )
+                        
+                        # Map of major earthquakes
+                        st.subheader("Global Distribution of Major Earthquakes")
+                        
+                        fig_major = px.scatter_geo(
+                            major_quakes,
+                            lat="latitude",
+                            lon="longitude",
+                            color="mag",
+                            size="mag",
+                            hover_name="place",
+                            hover_data=["time", "mag", "depth"],
+                           
+                            color_continuous_scale="Viridis",
+                            projection="natural earth",
+                            size_max=25
+                        )
+                        
+                        fig_major.update_layout(
+                            height=600,
+                            geo=dict(
                             showland=True,
                             landcolor="#d2b48c",
                             showocean=True,
@@ -3727,100 +3415,100 @@ if df is not None and not df.empty:
                             showcoastlines=True,
                             coastlinecolor="white",
                             bgcolor="black"
-                        ),
-                        paper_bgcolor="black",
-                        plot_bgcolor="black"
-                    )
-                    
-                    st.plotly_chart(fig_major, use_container_width=True)
-                    
-                    # Distribution by region
-                    st.subheader("Major Events by Region")
-                    
-                    region_major = major_quakes['region'].value_counts().reset_index()
-                    region_major.columns = ['Region', 'Count']
-                    
-                    fig_region_major = px.bar(
-                        region_major,
-                        x='Region',
-                        y='Count',
-                        color='Count',
-                        color_continuous_scale="Viridis",
-                        title="Distribution of Major Earthquakes by Region"
-                    )
-                    
-                    st.plotly_chart(fig_region_major, use_container_width=True)
-                    
-                    # Timeline of major events
-                    st.subheader("Timeline of Major Earthquakes")
-                    
-                    fig_timeline = px.scatter(
-                        major_quakes.sort_values('time'),
-                        x='time',
-                        y='mag',
-                        color='region',
-                        size='mag',
-                        hover_name='place',
-                        title="Major Earthquakes Timeline",
-                        labels={'time': 'Date', 'mag': 'Magnitude'}
-                    )
-                    
-                    # Add horizontal line at magnitude 8.0
-                    fig_timeline.add_hline(y=8.0, line_dash="dash", line_color="red", annotation_text="M8.0+")
-                    
-                    fig_timeline.update_layout(height=500)
-                    st.plotly_chart(fig_timeline, use_container_width=True)
-                    
-                    # Table of top 10 major events
-                    st.subheader("Top 10 Most Powerful Earthquakes (2005-2025)")
-                    
-                    top10 = major_quakes.nlargest(10, 'mag').reset_index(drop=True)
-                    top10['time'] = top10['time'].dt.strftime('%Y-%m-%d %H:%M:%S')
-                    
-                    # Add a rank column
-                    top10.index = top10.index + 1
-                    top10 = top10.rename_axis('Rank').reset_index()
-                    
-                    # Display the table
-                    st.dataframe(
-                        top10[['Rank', 'time', 'mag', 'place', 'depth']].rename(
-                            columns={'time': 'Date', 'mag': 'Magnitude', 'place': 'Location', 'depth': 'Depth (km)'}
-                        ),
-                        use_container_width=True
-                    )
-                
-                # Tab 5: Recurrence Analysis
-                with hist_tabs[4]:
-                    st.header("Recurrence Analysis and Forecasting")
-                    
-                    st.info("""
-                    This analysis examines historical patterns of earthquake recurrence in different regions
-                    to estimate probabilities of future seismic events. These are statistical estimates based
-                    on historical data, not definitive predictions.
-                    """)
-                    
-                    # Calculate recurrence intervals for regions with significant activity
-                    st.subheader("Recurrence Analysis by Region")
-                    
-                    # Only analyze regions with multiple major events
-                    region_counts = major_quakes['region'].value_counts()
-                    regions_with_multiple = region_counts[region_counts >= 2].index.tolist()
-                    
-                    if not regions_with_multiple:
-                        st.warning("Not enough major earthquakes in any single region for recurrence analysis")
-                    else:
-                        # Calculate recurrence statistics
-                        recurrence_data = []
+                            ),
+                            paper_bgcolor="black",
+                            plot_bgcolor="black"
+                        )
                         
-                        for region in regions_with_multiple:
-                            region_df = major_quakes[major_quakes['region'] == region].sort_values('time')
+                        st.plotly_chart(fig_major, use_container_width=True)
+                        
+                        # Distribution by region
+                        st.subheader("Major Events by Region")
+                        
+                        region_major = major_quakes['region'].value_counts().reset_index()
+                        region_major.columns = ['Region', 'Count']
+                        
+                        fig_region_major = px.bar(
+                            region_major,
+                            x='Region',
+                            y='Count',
+                            color='Count',
+                            color_continuous_scale="Viridis",
+                           
+                        )
+                        
+                        st.plotly_chart(fig_region_major, use_container_width=True)
+                        
+                        # Timeline of major events
+                        st.subheader("Timeline of Major Earthquakes")
+                        
+                        fig_timeline = px.scatter(
+                            major_quakes.sort_values('time'),
+                            x='time',
+                            y='mag',
+                            color='region',
+                            size='mag',
+                            hover_name='place',
+                           
+                            labels={'time': 'Date', 'mag': 'Magnitude'}
+                        )
+                        
+                        # Add horizontal line at magnitude 8.0
+                        fig_timeline.add_hline(y=8.0, line_dash="dash", line_color="red", annotation_text="M8.0+")
+                        
+                        fig_timeline.update_layout(height=500)
+                        st.plotly_chart(fig_timeline, use_container_width=True)
+                        
+                        # Table of top 10 major events
+                        st.subheader("Top 10 Most Powerful Earthquakes (2005-2025)")
+                        
+                        top10 = major_quakes.nlargest(10, 'mag').reset_index(drop=True)
+                        top10['time'] = top10['time'].dt.strftime('%Y-%m-%d %H:%M:%S')
+                        
+                        # Add a rank column
+                        top10.index = top10.index + 1
+                        top10 = top10.rename_axis('Rank').reset_index()
+                        
+                        # Display the table
+                        st.dataframe(
+                            top10[['Rank', 'time', 'mag', 'place', 'depth']].rename(
+                            columns={'time': 'Date', 'mag': 'Magnitude', 'place': 'Location', 'depth': 'Depth (km)'}
+                            ),
+                            use_container_width=True
+                        )
+                    
+                    # Tab 5: Recurrence Analysis
+                    with hist_tabs[4]:
+                        st.header("Recurrence Analysis and Forecasting")
+                        
+                        st.info("""
+                        This analysis examines historical patterns of earthquake recurrence in different regions
+                        to estimate probabilities of future seismic events. These are statistical estimates based
+                        on historical data, not definitive predictions.
+                        """)
+                        
+                        # Calculate recurrence intervals for regions with significant activity
+                        st.subheader("Recurrence Analysis by Region")
+                        
+                        # Only analyze regions with multiple major events
+                        region_counts = major_quakes['region'].value_counts()
+                        regions_with_multiple = region_counts[region_counts >= 2].index.tolist()
+                        
+                        if not regions_with_multiple:
+                            st.warning("Not enough major earthquakes in any single region for recurrence analysis")
+                        else:
+                            # Calculate recurrence statistics
+                            recurrence_data = []
+                        
+                            for region in regions_with_multiple:
+                                region_df = major_quakes[major_quakes['region'] == region].sort_values('time')
                             
                             # Calculate intervals between events
                             if len(region_df) >= 2:
                                 time_diffs = region_df['time'].diff().dropna()
                                 avg_interval_days = time_diffs.dt.total_seconds().mean() / (24*3600)
                                 avg_interval_years = avg_interval_days / 365.25
-                                
+                            
                                 # Last event and estimate of next
                                 last_event = region_df['time'].max()
                                 next_estimate = last_event + pd.Timedelta(days=avg_interval_days)
@@ -3829,53 +3517,50 @@ if df is not None and not df.empty:
                                     current_time = current_time.tz_localize(None)
                                 if last_event.tz is not None:
                                     last_event = last_event.tz_localize(None)
-                                time_since_last = (current_time - last_event).total_seconds() / (24*3600*365.25)
-                                
+                                    time_since_last = (current_time - last_event).total_seconds() / (24*3600*365.25)
+                                else:
+                                    time_since_last = None
+
                                 # Calculate probability using Poisson distribution
                                 lambda_param = 1 / avg_interval_years
                                 prob_1yr = 1 - np.exp(-lambda_param * 1)
                                 prob_5yr = 1 - np.exp(-lambda_param * 5)
-                                
+                            
                                 recurrence_data.append({
-                                    'Region': region,
-                                    'Events': len(region_df),
-                                    'Avg Interval (years)': avg_interval_years,
-                                    'Last Event': last_event,
-                                    'Time Since Last (years)': time_since_last,
-                                    'Next Estimate': next_estimate,
-                                    'Probability (1 year)': prob_1yr,
-                                    'Probability (5 years)': prob_5yr
+                                'Region': region,
+                                'Events': len(region_df),
+                                'Avg Interval (years)': avg_interval_years,
+                                'Last Event': last_event,
+                                'Time Since Last (years)': time_since_last,
+                                'Next Estimate': next_estimate,
+                                'Probability (1 year)': prob_1yr,
+                                'Probability (5 years)': prob_5yr
                                 })
                         
-                        recurrence_df = pd.DataFrame(recurrence_data)
+                            recurrence_df = pd.DataFrame(recurrence_data)
                         
-                        # Format for display
-                        display_df = recurrence_df.copy()
-                        display_df['Last Event'] = display_df['Last Event'].dt.strftime('%Y-%m-%d')
-                        display_df['Next Estimate'] = display_df['Next Estimate'].dt.strftime('%Y-%m-%d')
-                        display_df['Avg Interval (years)'] = display_df['Avg Interval (years)'].round(2)
-                        display_df['Time Since Last (years)'] = display_df['Time Since Last (years)'].round(2)
-                        display_df['Probability (1 year)'] = (display_df['Probability (1 year)'] * 100).round(2).astype(str) + '%'
-                        display_df['Probability (5 years)'] = (display_df['Probability (5 years)'] * 100).round(2).astype(str) + '%'
-                        
-                        st.dataframe(display_df, use_container_width=True)
-                        
-                        # Create probability visualization
-                        st.subheader("Probability of Major Earthquake in Next 5 Years")
-                        
+                            # Format for display
+                            display_df = recurrence_df.copy()
+                            display_df['Last Event'] = display_df['Last Event'].dt.strftime('%Y-%m-%d')
+                            display_df['Next Estimate'] = display_df['Next Estimate'].dt.strftime('%Y-%m-%d')
+                            display_df['Avg Interval (years)'] = display_df['Avg Interval (years)'].round(2)
+                            display_df['Time Since Last (years)'] = display_df['Time Since Last (years)'].round(2)
+                            display_df['Probability (1 year)'] = (display_df['Probability (1 year)'] * 100).round(2).astype(str) + '%'
+                            display_df['Probability (5 years)'] = (display_df['Probability (5 years)'] * 100).round(2).astype(str) + '%'
+
+                        # Create a bar chart for probability (5 years)
                         fig_prob = px.bar(
                             recurrence_df,
                             x='Region',
                             y='Probability (5 years)',
                             color='Probability (5 years)',
-                            color_continuous_scale='RdYlGn_r',  # Red for high probabilities
-                            text=recurrence_df['Probability (5 years)'].apply(lambda x: f"{x*100:.1f}%"),
-                            title="Probability of M7.0+ Earthquake in Next 5 Years by Region"
+                            color_continuous_scale='Inferno',
+                            labels={'Probability (5 years)': 'Probability (5 years)', 'Region': 'Region'},
+                            text=recurrence_df['Probability (5 years)'].apply(lambda x: f"{x*100:.1f}%")
                         )
-                        
                         fig_prob.update_traces(textposition='outside')
                         st.plotly_chart(fig_prob, use_container_width=True)
-                        
+                    
                         # Create an interactive forecast map
                         st.subheader("Interactive Forecast Map")
                         
@@ -3888,7 +3573,7 @@ if df is not None and not df.empty:
                         # Add circle markers for each region
                         for _, row in recurrence_df.iterrows():
                             # Get centroid coordinates for each region by filtering the data
-                            region_data = data[data['region'] == row['Region']]
+                            region_data = data_historic[data_historic['region'] == row['Region']]
                             lat = region_data['latitude'].mean()
                             lon = region_data['longitude'].mean()
                             
@@ -3937,43 +3622,36 @@ if df is not None and not df.empty:
                         # Add legend to map
                         legend_html = """
                         <div style="position: fixed; 
-                                    bottom: 50px; left: 50px; 
-                                    border:2px solid grey; z-index:9999; font-size:14px;
-                                    background-color: rgba(0, 0, 0, 0.7);
-                                    color: white;
-                                    padding: 10px;
-                                    border-radius: 5px;">
-                            <p><b>Probability of M7.0+ in Next 5 Years</b></p>
-                            <p><i class="fa fa-circle" style="color:red"></i> Very High (>75%)</p>
-                            <p><i class="fa fa-circle" style="color:orange"></i> High (50-75%)</p>
-                            <p><i class="fa fa-circle" style="color:yellow"></i> Moderate (25-50%)</p>
-                            <p><i class="fa fa-circle" style="color:green"></i> Low (<25%)</p>
+                            bottom: 50px; left: 50px; 
+                            border:2px solid grey; z-index:9999; font-size:14px;
+                            background-color: rgba(0, 0, 0, 0.7);
+                            color: white;
+                            padding: 10px;
+                            border-radius: 5px;">
+                        <p><b>Probability of M7.0+ in Next 5 Years</b></p>
+                        <p><i class="fa fa-circle" style="color:red"></i> Very High (>75%)</p>
+                        <p><i class="fa fa-circle" style="color:orange"></i> High (50-75%)</p>
+                        <p><i class="fa fa-circle" style="color:yellow"></i> Moderate (25-50%)</p>
+                        <p><i class="fa fa-circle" style="color:green"></i> Low (<25%)</p>
                         </div>
                         """
-                        
+                    
                         m.get_root().html.add_child(folium.Element(legend_html))
-                        
+                    
                         # Display the map
                         folium_static(m, width=1000, height=600)
-                        
+                    
                         # Disclaimer
                         st.warning("""
                         ⚠️ **Disclaimer:** These predictions are based solely on statistical analysis of historical data.
                         Earthquake forecasting has inherent limitations and uncertainties. This information should be used
                         for educational purposes only and not for making critical safety decisions.
                         """)
-            
-            else:
-                st.error("Failed to load historical earthquake data. Please check the file path and format.")  
+                    
+                else:
+                    st.error("Failed to load historical earthquake data. Please check the file path and format.")
 
-    # --- Data Table and Download ---
-    with st.expander("View data in tabular format"):
-        display_cols = [col for col in ['time', 'place', 'mag', 'depth', 'type', 'magType', 'rms'] if col in filtered_df.columns]
-        sort_col = st.selectbox("Sort by", options=display_cols, index=0, key="sortcol")
-        sort_order = st.radio("Order", options=['Descending', 'Ascending'], index=0, horizontal=True, key="sortorder")
-        sorted_df = filtered_df.sort_values(by=sort_col, ascending=(sort_order == 'Ascending'))
-        st.dataframe(sorted_df[display_cols], use_container_width=True)
-        download_filtered_data(sorted_df, T)
+
 
 # --- Sidebar About Section ---
 st.sidebar.markdown("---")
