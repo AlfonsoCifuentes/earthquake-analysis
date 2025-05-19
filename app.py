@@ -1,3 +1,4 @@
+from __future__ import unicode_literals
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -19,9 +20,42 @@ from scipy.stats import poisson
 from datetime import datetime, timedelta
 import matplotlib.cm as cm
 import seaborn as sns
+import io
+from sklearn.linear_model import LinearRegression
+from dateutil import parser as date_parser
+from tornado.websocket import websocket_connect
+from tornado.ioloop import IOLoop
+from tornado import gen
+import logging
+import json
+import sys
+import threading
+import xml.etree.ElementTree as ET
+import websocket
 
+# --- WebSocket client ---
+def on_message(ws, message):
+    print("Received message:", message)
 
+def on_error(ws, error):
+    print("WebSocket error:", error)
 
+def on_close(ws):
+    print("WebSocket closed")
+
+def on_open(ws):
+    print("WebSocket opened")
+
+def start_websocket():
+    ws = websocket.WebSocketApp("wss://your-websocket-url",
+                                  on_message=on_message,
+                                  on_error=on_error,
+                                  on_close=on_close)
+    ws.on_open = on_open
+    ws.run_forever()
+
+# Start WebSocket in a separate thread
+threading.Thread(target=start_websocket).start()
 
 # --- Define translations ---
 T = {
@@ -532,6 +566,12 @@ div[class*="border-radius"] h4 {
     border-left: 0.5rem solid #ffb347 !important;
 }
             
+.stAlert[data-testid="stAlertSuccess"] {
+    background: #2ecc40 !important;   /* Verde */
+    color: #fff !important;
+    border-left: 0.5rem solid #27ae60 !important;
+}
+            
 </style>
 """, unsafe_allow_html=True)
 
@@ -819,13 +859,17 @@ else:
         df = load_data()
 
 if df is not None and not df.empty:
-    # --- Dynamic Filtering ---
-    if st.sidebar.button(T["reset_filters"]):
-        reset_filters(df)
+    # Apply filters from sidebar
     date_range, mag_range, depth_range, selected_types, selected_regions = sidebar_filters(df, T)
-
+    
     # Filtering logic
-    filtered_df = df.copy()
+    filtered_df = filter_data(df, date_range, mag_range, depth_range, selected_types, selected_regions)
+    
+    if len(filtered_df) == 0:
+        st.warning("No data available with the selected filters. Please adjust the filters.")
+    else:
+        # Filtering logic
+        filtered_df = df.copy()
     if len(date_range) == 2:
         start_date, end_date = date_range
         start_datetime = pd.Timestamp(start_date)
@@ -1082,19 +1126,48 @@ if df is not None and not df.empty:
             with geo_tabs[1]:
                 st.subheader("Seismic Activity Heat Map")
                 st.markdown("This heat map shows areas with higher concentration of seismic activity. Brighter areas indicate higher density of events.")
-                fig_heat = px.density_map(  # Changed from density_mapbox to density_map
-                    filtered_df,
-                    lat="latitude",
-                    lon="longitude",
-                    z="mag",
-                    radius=10,
-                    center=dict(lat=filtered_df['latitude'].mean(), lon=filtered_df['longitude'].mean()),
-                    zoom=1,
-                    map_style="carto-positron",  # Changed to map_style from mapbox_style
-                    opacity=0.8
-                )
-                fig_heat.update_layout(margin={"r": 0, "t": 0, "l": 0, "b": 0}, height=600)
-                st.plotly_chart(fig_heat, use_container_width=True)
+
+                # Add padding/margin to the container div to prevent the map from being hidden
+                with st.container():
+                    st.markdown(
+                        """
+                        <div style="padding: 40px 2rem 40px 0;">
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                    fig_heat = px.density_mapbox(
+                        filtered_df,
+                        lat="latitude",
+                        lon="longitude",
+                        z="mag",
+                        radius=10,
+                        center=dict(lat=filtered_df['latitude'].mean(), lon=filtered_df['longitude'].mean()),
+                        zoom=1,
+                        mapbox_style="carto-darkmatter",  # Use dark theme
+                        opacity=0.8,
+                        color_continuous_scale='Inferno'
+                    )
+                    fig_heat.update_layout(
+                        margin={"r": 24, "t": 24, "l": 24, "b": 24},
+                        height=600,
+                        paper_bgcolor="black",
+                        plot_bgcolor="black",
+                        coloraxis_colorbar=dict(
+                            x=0.85,  # Move colorbar to the left (default is 1.0)
+                            xanchor='left',
+                            len=0.7,
+                            thickness=18,
+                            bgcolor='rgba(35,37,38,0.7)',
+                            bordercolor="#ffb347",
+                            borderwidth=1,
+                            outlinewidth=1,
+                            tickcolor="#ffb347",
+                            title_side='right'
+                        )
+                    )
+                    st.plotly_chart(fig_heat, use_container_width=True)
+                    st.markdown("</div>", unsafe_allow_html=True)
+
                 st.subheader("Significant Events (Magnitude ≥ 4.0)")
                 strong_events = filtered_df[filtered_df['mag'] >= 4.0].sort_values(by='mag', ascending=False)
                 if not strong_events.empty:
@@ -1403,7 +1476,7 @@ if df is not None and not df.empty:
                     # Tab 1: Volcano Overview
                     with volcano_tabs[0]:
                         st.subheader("Global Volcano Dataset Overview")
-                        
+                        st.text("This section provides an overview of the global volcano dataset, including key statistics, type distributions, and country-level summaries.")
                         # Display basic metrics
                         col1, col2, col3, col4 = st.columns(4)
                         with col1:
@@ -1444,47 +1517,65 @@ if df is not None and not df.empty:
                             choices = ['Recent (Last 10 years)', 'Historical (11-100 years)', 
                                       'Ancient (101-1000 years)', 'Prehistoric (>1000 years)']
                             
-                            with col1:
-                                status_counts = df_volcano['status_category'].value_counts()
-                                fig_status = px.bar(
-                                    x=status_counts.index, 
-                                    y=status_counts.values,
-                                    labels={'x': 'Status', 'y': 'Count'},
-                                    
-                                    color=status_counts.values,
-                                    color_continuous_scale=px.colors.sequential.Inferno
-                                )
-                                st.plotly_chart(fig_status, use_container_width=True)
+                            # Add title before the chart
+                            st.markdown("#### Distribution of Volcanoes by Activity Status")
                             
-                            with col2:
-                                activity_counts = df_volcano['activity_category'].value_counts()
-                                fig_activity = px.bar(
-                                    x=activity_counts.index, 
-                                    y=activity_counts.values,
-                                    labels={'x': 'Last Eruption', 'y': 'Count'},
-                                    
-                                    color=activity_counts.values,
-                                    color_continuous_scale=px.colors.sequential.Inferno
+                            # Replace "Unknown" with "Dormant" in status categories
+                            df_volcano['status_category'] = df_volcano['status_category'].replace('Unknown', 'Dormant')
+                            
+                            # Create a bar chart showing volcano status categories
+                            status_counts = df_volcano['status_category'].value_counts()
+                            fig_status = px.bar(
+                                x=status_counts.index, 
+                                y=status_counts.values,
+                                labels={'x': 'Status', 'y': 'Count'},
+                                color=status_counts.values,
+                                color_continuous_scale=px.colors.sequential.Inferno
+                            )
+                            # Remove legend and add more margin space to prevent elements from being hidden
+                            fig_status.update_layout(
+                                showlegend=False,
+                                margin=dict(l=50, r=175, t=30, b=50),  # Add generous margins on all sides
+                                autosize=True,
+                                height=400,  # Set a fixed height to ensure proper rendering
+                                xaxis=dict(
+                                    tickangle=0,
+                                    tickmode='array',
+                                    tickvals=list(range(len(status_counts))),
+                                    ticktext=status_counts.index
                                 )
-                                fig_activity.update_layout(xaxis={'categoryorder': 'array', 'categoryarray': choices})
-                                st.plotly_chart(fig_activity, use_container_width=True)
-                        
+                            )
+                            # Ensure the chart container has padding
+                            st.markdown('<div style="padding: 20px 0;">', unsafe_allow_html=True)
+                            st.plotly_chart(fig_status, use_container_width=True)
+                            st.markdown('</div>', unsafe_allow_html=True)
+
+                            # Add explanatory text below the chart
+                            st.text("""
+                            The chart above shows the distribution of volcanoes by their activity status. Active volcanoes have erupted in recent history or 
+                            show signs of ongoing activity. Dormant volcanoes haven't erupted recently but may become active again in the future. 
+                            Extinct volcanoes are considered to have no possibility of eruption. This classification helps scientists 
+                            monitor volcanic hazards and prioritize observation efforts around the world.
+                            """)
                         # Top countries by volcano count
                         if 'country' in df_volcano.columns:
                             st.subheader("Countries with Most Volcanoes")
                             country_counts = df_volcano['country'].value_counts().reset_index().head(15)
-                            country_counts.columns = ['Country', 'Number of Volcanoes']
+                            country_counts.columns = ['Country', 'Number of<br>Volcanoes']
                             
                             fig_countries = px.bar(
                                 country_counts,
                                 y='Country',
-                                x='Number of Volcanoes',
+                                x='Number of<br>Volcanoes',
                                 orientation='h',
-                                color='Number of Volcanoes',
+                                color='Number of<br>Volcanoes',
                                 
                                 color_continuous_scale=px.colors.sequential.Inferno
                             )
-                            fig_countries.update_layout(yaxis={'categoryorder': 'total ascending'})
+                            fig_countries.update_layout(
+                                yaxis={'categoryorder': 'total ascending'},
+                                margin=dict(r=170)  # Added more right margin
+                            )
                             st.plotly_chart(fig_countries, use_container_width=True)
                         
                         # Elevation distribution
@@ -1500,7 +1591,8 @@ if df is not None and not df.empty:
                             )
                             fig_elev.update_layout(
                                 xaxis_title='Elevation (meters)',
-                                yaxis_title='Number of Volcanoes'
+                                yaxis_title='Number of Volcanoes',
+                                margin=dict(l=50, r=175, t=30, b=50)  # Added margins with 175px on right
                             )
                             st.plotly_chart(fig_elev, use_container_width=True)
                             
@@ -1517,7 +1609,8 @@ if df is not None and not df.empty:
                                 fig_elev_type.update_layout(
                                     xaxis_title='Volcano Type',
                                     yaxis_title='Elevation (meters)',
-                                    showlegend=False
+                                    showlegend=False,
+                                    margin=dict(l=50, r=175, t=30, b=50)  # Added margins with 175px on right
                                 )
                                 st.plotly_chart(fig_elev_type, use_container_width=True)
                     
@@ -1540,181 +1633,193 @@ if df is not None and not df.empty:
                         color_column = 'volcano_type_category' if 'volcano_type_category' in df_volcano.columns else 'status_category'
                         
                         # Create the map
-                        fig_volcano_map = px.scatter_geo(
-                            df_volcano,
-                            lat='latitude',
-                            lon='longitude',
-                            color=color_column,
-                            hover_name='volcano_name',
-                            hover_data={
-                                'country': True,
-                                'elevation': ':.0f m',
-                                'status_category': True,
-                                'last_known': True,
-                                'latitude': False,
-                                'longitude': False
-                            },
-                     
-                            size_max=15,
-                            projection='natural earth'
-                        )
+                        # Replace 'Unknown' and 'undefined' with blank space for display
+                        df_volcano_display = df_volcano.copy()
                         
-                        # Customize marker appearance
-                        fig_volcano_map.update_traces(
-                            marker=dict(
-                                symbol='triangle-up',
-                                size=10,
-                                opacity=0.8,
-                                line=dict(width=1, color='white')
+                        if color_column in df_volcano_display.columns:
+                            # Convierte todo a string y elimina espacios
+                            df_volcano_display[color_column] = df_volcano_display[color_column].astype(str).str.strip()
+                            # Filtra valores vacíos, NaN, "nan", "undefined" (en cualquier capitalización)
+                            df_volcano_display = df_volcano_display[
+                                df_volcano_display[color_column].notna() &
+                                (df_volcano_display[color_column] != "") &
+                                (df_volcano_display[color_column].str.lower() != "undefined") &
+                                (df_volcano_display[color_column].str.lower() != "nan")
+                            ]
+                            
+                            fig_volcano_map = px.scatter_geo(
+                                df_volcano_display,
+                                lat='latitude',
+                                lon='longitude',
+                                color=color_column,
+                                hover_name='volcano_name',
+                                hover_data={
+                                    'country': True,
+                                    'elevation': ':.0f m',
+                                    'status_category': True,
+                                    'latitude': False,
+                                    'longitude': False
+                                },
+                                size_max=15,
+                                projection='natural earth'
                             )
-                        )
-                        
-                        # Update map layout to match the earthquake map style
-                        fig_volcano_map.update_layout(
-                            margin={"r": 0, "t": 50, "l": 0, "b": 0},
-                            height=600,
-                            geo=dict(
-                                showland=True,
-                                landcolor="#d2b48c",
-                                showocean=True,
-                                oceancolor="#002244",
-                                showcountries=True,
-                                countrycolor="white",
-                                showcoastlines=True,
-                                coastlinecolor="white",
-                                bgcolor="black",
-                                projection_scale=1
-                            ),
-                            paper_bgcolor="black",
-                            plot_bgcolor="black",
-                            title_font=dict(size=20, color='white')
-                        )
-                        
-                        st.plotly_chart(fig_volcano_map, use_container_width=True)
-                        
-                        # Ring of Fire highlight map
-                        st.subheader("Pacific Ring of Fire")
-                        
-                        # Define Ring of Fire boundaries (approximate)
-                        def is_in_ring_of_fire(lat, lon):
-                            # Pacific rim coordinates (very approximate)
-                            if (lon > 120 or lon < -60) and (lat > -60 and lat < 70):
-                                return 'Ring of Fire'
-                            else:
-                                return 'Other Regions'
-                        
-                        # Add Ring of Fire classification
-                        df_volcano['tectonic_zone'] = df_volcano.apply(
-                            lambda x: is_in_ring_of_fire(x['latitude'], x['longitude']), axis=1
-                        )
-                        
-                        # Create focused map for Ring of Fire
-                        ring_of_fire_map = px.scatter_geo(
-                            df_volcano,
-                            lat='latitude',
-                            lon='longitude',
-                            color='tectonic_zone',
-                            hover_name='volcano_name',
-                            hover_data={
-                                'country': True,
-                                'elevation': ':.0f m',
-                                'status_category': True,
-                                'last_known': True,
-                                'latitude': False,
-                                'longitude': False
-                            },
-                            labels={'last_known': 'Last Known'},
-                     
-                            color_discrete_map={
-                                'Ring of Fire': '#FF4500',  # Bright orange-red
-                                'Other Regions': '#707070'  # Gray
-                            },
-                            size_max=15,
-                            projection='orthographic'  # 3D-like globe projection
-                        )
-                        
-                        # Set initial view to Pacific
-                        ring_of_fire_map.update_geos(
-                            projection_rotation=dict(lon=-150, lat=30, roll=0),
-                            showcountries=True
-                        )
-                        
-                        # Customize marker appearance
-                        ring_of_fire_map.update_traces(
-                            marker=dict(
-                                symbol='triangle-up',
-                                size=8,
-                                opacity=0.8,
-                                line=dict(width=1, color='white')
+
+                            # Customize marker appearance
+                            fig_volcano_map.update_traces(
+                                marker=dict(
+                                    symbol='triangle-up',
+                                    size=10,
+                                    opacity=0.8,
+                                    line=dict(width=1, color='white')
+                                )
                             )
-                        )
+
+                            # Update map layout to match the earthquake map style and remove legend title
+                            fig_volcano_map.update_layout(
+                                legend_title_text="Volcano Type", 
+                                margin={"r": 0, "t": 50, "l": 0, "b": 0},
+                                height=600,
+                                geo=dict(
+                                    showland=True,
+                                    landcolor="#d2b48c",
+                                    showocean=True,
+                                    oceancolor="#002244",
+                                    showcountries=True,
+                                    countrycolor="white",
+                                    showcoastlines=True,
+                                    coastlinecolor="white",
+                                    bgcolor="black",
+                                    projection_scale=1
+                                ),
+                                paper_bgcolor="black",
+                                plot_bgcolor="black",
+                                title_font=dict(size=20, color='white')
+                            )
+
+                            st.plotly_chart(fig_volcano_map, use_container_width=True)
+                            # Ring of Fire highlight map
+                            st.subheader("Pacific Ring of Fire")
+                            
+                            # Define Ring of Fire boundaries (approximate)
+                            def is_in_ring_of_fire(lat, lon):
+                                # Pacific rim coordinates (very approximate)
+                                if (lon > 120 or lon < -60) and (lat > -60 and lat < 70):
+                                    return 'Ring of Fire'
+                                else:
+                                    return 'Other Regions'
+                            
+                            # Add Ring of Fire classification
+                            df_volcano['tectonic_zone'] = df_volcano.apply(
+                                lambda x: is_in_ring_of_fire(x['latitude'], x['longitude']), axis=1
+                            )
+                            
+                            # Create focused map for Ring of Fire
+                            ring_of_fire_map = px.scatter_geo(
+                                df_volcano,
+                                lat='latitude',
+                                lon='longitude',
+                                color='tectonic_zone',
+                                hover_name='volcano_name',
+                                hover_data={
+                                    'country': True,
+                                    'elevation': ':.0f m',
+                                    'status_category': True,
+                                    'last_known': True,
+                                    'latitude': False,
+                                    'longitude': False
+                                },
+                                labels={'last_known': 'Last Known'},
+                     
+                                color_discrete_map={
+                                    'Ring of Fire': '#FF4500',  # Bright orange-red
+                                    'Other Regions': '#707070'  # Gray
+                                },
+                                size_max=15,
+                                projection='orthographic'  # 3D-like globe projection
+                            )
+                            
+                            # Set initial view to Pacific
+                            ring_of_fire_map.update_geos(
+                                projection_rotation=dict(lon=-150, lat=30, roll=0),
+                                showcountries=True
+                            )
+                            
+                            # Customize marker appearance
+                            ring_of_fire_map.update_traces(
+                                marker=dict(
+                                    symbol='triangle-up',
+                                    size=8,
+                                    opacity=0.8,
+                                    line=dict(width=1, color='white')
+                                )
+                            )
+                            
+                            # Style the map
+                            ring_of_fire_map.update_layout(
+                                height=600,
+                                geo=dict(
+                                    showland=True,
+                                    landcolor="#552211",  # Dark brown land
+                                    showocean=True,
+                                    oceancolor="#003366",  # Dark blue ocean
+                                    showcountries=True,
+                                    countrycolor="white",
+                                    showcoastlines=True,
+                                    coastlinecolor="white",
+                                    bgcolor="black"
+                                ),
+                                paper_bgcolor="black",
+                                plot_bgcolor="black"
+                            )
+                            
+                            st.plotly_chart(ring_of_fire_map, use_container_width=True)
+                            
+                            # Volcano density heatmap
+                            st.subheader("Volcano Density Heatmap")
+                            
+                            fig_volcano_heat = px.density_mapbox(
+                                df_volcano,
+                                lat='latitude',
+                                lon='longitude',
+                                z=df_volcano['elevation'] if 'elevation' in df_volcano.columns else None,
+                                radius=20,
+                                center=dict(lat=0, lon=0),
+                                zoom=0,
+                                mapbox_style="carto-darkmatter",
+                                
+                                color_continuous_scale='Inferno'
+                            )
+                            
+                            fig_volcano_heat.update_layout(height=600)
+                            st.plotly_chart(fig_volcano_heat, use_container_width=True)
+                            
+                            # Educational information
+                            with st.expander("📚 About Volcanic Distribution Patterns"):
+                                st.markdown("""
+                                ### Global Volcanic Distribution
+                                
+                                Volcanoes are not randomly distributed around the world. Their locations are directly 
+                                tied to tectonic plate boundaries and hotspots:
+                                
+                                1. **Pacific Ring of Fire**: Contains approximately 75% of the world's active volcanoes,
+                                   following tectonic plate boundaries around the Pacific Ocean.
+                                
+                                2. **Mid-Ocean Ridges**: Underwater mountain ranges formed by divergent tectonic plates,
+                                   where magma rises to create new oceanic crust.
+                                
+                                3. **Continental Rift Zones**: Areas where the Earth's crust is being pulled apart,
+                                   allowing magma to rise to the surface.
+                                
+                                4. **Hotspots**: Volcanic regions created by mantle plumes that remain relatively fixed
+                                   while tectonic plates move over them (e.g., Hawaiian Islands).
+                                
+                                5. **Subduction Zones**: Where one tectonic plate is forced beneath another, creating
+                                   conditions for explosive volcanism (e.g., Andes Mountains).
+                                
+                                The visualization above clearly shows these patterns, particularly highlighting the 
+                                Pacific Ring of Fire and other major tectonic boundaries.
+                                """)
                         
-                        # Style the map
-                        ring_of_fire_map.update_layout(
-                            height=600,
-                            geo=dict(
-                                showland=True,
-                                landcolor="#552211",  # Dark brown land
-                                showocean=True,
-                                oceancolor="#003366",  # Dark blue ocean
-                                showcountries=True,
-                                countrycolor="white",
-                                showcoastlines=True,
-                                coastlinecolor="white",
-                                bgcolor="black"
-                            ),
-                            paper_bgcolor="black",
-                            plot_bgcolor="black"
-                        )
-                        
-                        st.plotly_chart(ring_of_fire_map, use_container_width=True)
-                        
-                        # Volcano density heatmap
-                        st.subheader("Volcano Density Heatmap")
-                        
-                        fig_volcano_heat = px.density_mapbox(
-                            df_volcano,
-                            lat='latitude',
-                            lon='longitude',
-                            z=df_volcano['elevation'] if 'elevation' in df_volcano.columns else None,
-                            radius=20,
-                            center=dict(lat=0, lon=0),
-                            zoom=0,
-                            mapbox_style="carto-darkmatter",
-                            
-                            color_continuous_scale='Inferno'
-                        )
-                        
-                        fig_volcano_heat.update_layout(height=600)
-                        st.plotly_chart(fig_volcano_heat, use_container_width=True)
-                        
-                        # Educational information
-                        with st.expander("📚 About Volcanic Distribution Patterns"):
-                            st.markdown("""
-                            ### Global Volcanic Distribution
-                            
-                            Volcanoes are not randomly distributed around the world. Their locations are directly 
-                            tied to tectonic plate boundaries and hotspots:
-                            
-                            1. **Pacific Ring of Fire**: Contains approximately 75% of the world's active volcanoes,
-                               following tectonic plate boundaries around the Pacific Ocean.
-                            
-                            2. **Mid-Ocean Ridges**: Underwater mountain ranges formed by divergent tectonic plates,
-                               where magma rises to create new oceanic crust.
-                            
-                            3. **Continental Rift Zones**: Areas where the Earth's crust is being pulled apart,
-                               allowing magma to rise to the surface.
-                            
-                            4. **Hotspots**: Volcanic regions created by mantle plumes that remain relatively fixed
-                               while tectonic plates move over them (e.g., Hawaiian Islands).
-                            
-                            5. **Subduction Zones**: Where one tectonic plate is forced beneath another, creating
-                               conditions for explosive volcanism (e.g., Andes Mountains).
-                            
-                            The visualization above clearly shows these patterns, particularly highlighting the 
-                            Pacific Ring of Fire and other major tectonic boundaries.
-                            """)
-                    
                     # Tab 3: Activity Analysis
                     with volcano_tabs[2]:
                         st.subheader("Volcanic Activity Analysis")
@@ -1883,14 +1988,35 @@ if df is not None and not df.empty:
                                         type_activity_pct,
                                         text_auto='.1f',
                                         labels=dict(x="Activity Category", y="Volcano Type", color="Percentage"),
-                                        
                                         color_continuous_scale='Inferno'
                                     )
+
+                                    # Improve hover template
                                     fig_type_activity.update_traces(
                                         hovertemplate="Type: %{y}<br>Activity: %{x}<br>Percentage: %{z:.1f}%<extra></extra>"
                                     )
+
+                                    # Add proper margins to ensure nothing is cut off
+                                    fig_type_activity.update_layout(
+                                        height=500,  # Increase height for better visualization
+                                        margin=dict(l=50, r=150, t=50, b=50),  # Increased right margin to 150
+                                        xaxis=dict(side='bottom'),  # Ensure x-axis labels are at the bottom
+                                        yaxis=dict(side='left'),    # Ensure y-axis labels are on the left
+                                    )
+
+                                    # Adjust colorbar position to avoid overlap
+                                    fig_type_activity.update_layout(
+                                        coloraxis_colorbar=dict(
+                                            len=0.8,  # Shorter colorbar
+                                            thickness=20,  # Thicker colorbar for better visibility
+                                            x=1.02,   # Position more to the left (was 1.05)
+                                            y=0.5,    # Center vertically
+                                            xanchor='left',  # Anchor to left side
+                                            yanchor='middle'  # Anchor to middle vertically
+                                        ),
+                                    )
+
                                     st.plotly_chart(fig_type_activity, use_container_width=True)
-                        
                         # Educational content
                         with st.expander("📚 Learn About Different Volcano Types"):
                             st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/4/4f/Volcano_types.svg/1200px-Volcano_types.svg.png", use_container_width=True)
@@ -2769,7 +2895,7 @@ if df is not None and not df.empty:
                             x = compare_df[x_variable].values.reshape(-1, 1)
                             y = compare_df[y_variable].values
                             
-                            from sklearn.linear_model import LinearRegression
+
                             model = LinearRegression()
                             model.fit(x, y)
                             
@@ -2800,130 +2926,496 @@ if df is not None and not df.empty:
                         st.warning("Not enough numeric columns to perform comparative analysis.")
                 except Exception as e:
                     st.error(f"Error in comparative analysis: {e}")
-
-        # --- Multi-Source Alert Center Tab ---
+        
+        # --- Alert Center Tab ---
         with main_tabs[4]:
             st.markdown("## 🚨 Multi-Source Alert Center")
-            st.info("Este módulo verifica múltiples fuentes de datos sobre alertas sísmicas recientes y notifica sobre eventos significativos.")
+            st.text("Este módulo verifica múltiples fuentes de datos sobre alertas sísmicas recientes y notifica sobre eventos significativos.")
+
+            # -------------------------------------------------
+            # USGS Significant Events
+            # -------------------------------------------------
+            st.markdown("### 📡 USGS Significant Events")
+            st.markdown("Displaying significant earthquake events from the USGS feed")
+
+            try:
+                # Get significant events from USGS
+                sig_url = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/significant_week.csv"
+
+                # Show loading indicator
+                with st.spinner("Verifying USGS alerts..."):
+                    # Try to load data with timeout
+                    try:
+                        timeout_seconds = 10  # Set reasonable timeout
+                        response = requests.get(sig_url, timeout=timeout_seconds)
+                        response.raise_for_status()
+                        sig_df = pd.read_csv(io.StringIO(response.text))
+                        sig_df['time'] = pd.to_datetime(sig_df['time']).dt.tz_localize(None)
+
+                        # Filter events from the last 24 hours
+                        last_24h = pd.Timestamp.now() - pd.Timedelta(hours=24)
+                        recent_sig = sig_df[sig_df['time'] > last_24h]
+
+                        # Check if there are recent alerts
+                        if not recent_sig.empty:
+                            # Create alert with color and emoji based on magnitude
+                            for _, event in recent_sig.iterrows():
+                                mag = event['mag']
+                                place = event['place']
+                                event_time = event['time']
+
+                                # Color and emoji based on magnitude
+                                if (mag >= 7.0):
+                                    st.error(f"🔴 ⚠️ CRITICAL ALERT: Magnitude {mag:.1f} in {place} ({event_time})")
+                                elif (mag >= 6.0):
+                                    st.warning(f"🟠 ⚠️ HIGH ALERT: Magnitude {mag:.1f} in {place} ({event_time})")
+                                else:
+                                    st.info(f"🔵 ℹ️ ALERT: Magnitude {mag:.1f} in {place} ({event_time})")
+
+                            # Show table of recent significant events
+                            st.dataframe(
+                                recent_sig[['time', 'place', 'mag', 'depth', 'type']],
+                                use_container_width=True,
+                                height=250  # Fixed height to avoid excessive scrolling
+                            )
+                        else:
+                            # Changed to success (green background) as requested
+                            st.success("✓ No significant USGS alerts in the last 24 hours")
+                    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                        st.warning(f"Could not connect to USGS API: {e}. Check your internet connection.")
+                        # Provide fallback information
+                        st.info("You can check alerts manually at: https://earthquake.usgs.gov/earthquakes/map/")
+            except Exception as e:
+                st.error(f"Error processing USGS data: {e}")
+                # Provide a fallback
+                st.info("Unable to load recent earthquake alerts. Try refreshing the page or check USGS website directly.")
             
-            # Crear columnas para mostrar diferentes fuentes de alerta
-            alert_col1, alert_col2 = st.columns(2)
+            # -------------------------------------------------
+            # Latest 10 USGS Alerts
+            # -------------------------------------------------
+            st.markdown("### 🔄 Latest 10 USGS Alerts")
+            st.markdown("Shows the most recent earthquake events regardless of significance")
             
-            # Primera fuente - USGS Significant Events
-            with alert_col1:
-                st.subheader("USGS Significant Events")
-                
+            # Function to get the latest 10 alerts from USGS
+            @st.cache_data(ttl=300)  # Cache for 5 minutes
+            def get_latest_usgs_alerts():
                 try:
-                    # Get significant events from USGS
-                    sig_url = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/significant_week.csv"
+                    # USGS API URL for latest earthquakes (all, not just significant ones)
+                    url = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson"
+                    response = requests.get(url, timeout=10)
+                    response.raise_for_status()
+                    data = response.json()
                     
-                    # Show loading indicator
-                    with st.spinner("Verifying USGS alerts..."):
-                        # Try to load data with timeout
-                        try:
-                            timeout_seconds = 10  # Set reasonable timeout
-                            sig_df = pd.read_csv(sig_url, timeout=timeout_seconds)
-                            sig_df['time'] = pd.to_datetime(sig_df['time']).dt.tz_localize(None)
-                            
-                            # Filter events from the last 24 hours
-                            last_24h = pd.Timestamp.now() - pd.Timedelta(hours=24)
-                            recent_sig = sig_df[sig_df['time'] > last_24h]
-                            
-                            # Check if there are recent alerts
-                            if not recent_sig.empty:
-                                # Create alert with color and emoji based on magnitude
-                                for _, event in recent_sig.iterrows():
-                                    mag = event['mag']
-                                    place = event['place']
-                                    event_time = event['time']
-                                    
-                                    # Color and emoji based on magnitude
-                                    if (mag >= 7.0):
-                                        st.error(f"🔴 ⚠️ CRITICAL ALERT: Magnitude {mag:.1f} in {place} ({event_time})")
-                                    elif (mag >= 6.0):
-                                        st.warning(f"🟠 ⚠️ HIGH ALERT: Magnitude {mag:.1f} in {place} ({event_time})")
-                                    else:
-                                        st.info(f"🔵 ℹ️ ALERT: Magnitude {mag:.1f} in {place} ({event_time})")
+                    # Process the data
+                    alerts = []
+                    if 'features' in data:
+                        for feature in data['features'][:10]:  # Take only the first 10
+                            if 'properties' in feature:
+                                props = feature['properties']
+                                geometry = feature.get('geometry', {})
+                                coordinates = geometry.get('coordinates', [0, 0, 0]) if geometry else [0, 0, 0]
                                 
-                                # Show table of recent significant events
-                                st.dataframe(
-                                    recent_sig[['time', 'place', 'mag', 'depth', 'type']],
-                                    use_container_width=True
-                                )
-                            else:
-                                st.success("✓ No significant USGS alerts in the last 24 hours")
-                        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
-                            st.warning(f"Could not connect to USGS API: {e}. Check your internet connection.")
-                            # Provide fallback information
-                            st.info("You can check alerts manually at: https://earthquake.usgs.gov/earthquakes/map/")
-                        except Exception as e:
-                            st.error(f"Error processing USGS data: {e}")
-                            # Provide a fallback
-                            st.info("Unable to load recent earthquake alerts. Try refreshing the page or check USGS website directly.")
+                                alerts.append({
+                                    'time': props.get('time', ''),
+                                    'place': props.get('place', ''),
+                                    'magnitude': props.get('mag', 0),
+                                    'type': props.get('type', ''),
+                                    'status': props.get('status', ''),
+                                    'depth': props.get('depth', 0) if 'depth' in props else coordinates[2],
+                                    'latitude': coordinates[1] if len(coordinates) > 1 else 0,
+                                    'longitude': coordinates[0] if len(coordinates) > 0 else 0
+                                })
+                    return alerts
                 except Exception as e:
-                    st.error(f"Error in USGS source: {e}")
-            
-            # Segunda fuente - EMSC (Centro Sismológico Euro-Mediterráneo)
-            with alert_col2:
-                st.subheader("EMSC Recent Events")
+                    st.error(f"Error retrieving USGS alerts: {e}")
+                    return []
                 
+            # Get and display the alerts
+            with st.spinner("Retrieving latest USGS alerts..."):
+                usgs_alerts = get_latest_usgs_alerts()
+            
+            if usgs_alerts:
+                # Convert to DataFrame for display
+                alerts_df = pd.DataFrame(usgs_alerts)
+                
+                # Convert timestamp
+                if 'time' in alerts_df.columns:
+                    try:
+                        alerts_df['time'] = pd.to_datetime(alerts_df['time'], unit='ms')
+                    except:
+                        pass  # If already a string, leave it as is
+                        
+                    # Show critical alerts first
+                    high_mag_alerts = [a for a in usgs_alerts if a.get('magnitude', 0) >= 6.0]
+                    for alert in high_mag_alerts:
+                        mag = alert.get('magnitude', 0)
+                        place = alert.get('place', "Unknown location")
+                        time = alert.get('time', "")
+                        if isinstance(time, (int, float)):
+                            time = pd.to_datetime(time, unit='ms')
+                        if mag >= 7.0:
+                            st.error(f"🔴 ⚠️ CRITICAL ALERT: Magnitude {mag:.1f} in {place} ({time}) [USGS]")
+                        elif mag >= 6.0:
+                            st.warning(f"🟠 ⚠️ HIGH ALERT: Magnitude {mag:.1f} in {place} ({time}) [USGS]")
+                    
+                    # Show complete table with fixed height
+                    st.dataframe(
+                        alerts_df.rename(columns={
+                            'time': 'Time',
+                            'place': 'Location',
+                            'magnitude': 'Magnitude',
+                            'depth': 'Depth (km)',
+                            'type': 'Type'
+                        }),
+                        use_container_width=True,
+                        height=400  # Fixed height
+                    )
+                    
+                    # Add map to show locations of latest alerts
+                    if 'latitude' in alerts_df.columns and 'longitude' in alerts_df.columns:
+                        st.subheader("Latest USGS Alerts Map")
+                        
+                        fig_alerts = px.scatter_mapbox(
+                            alerts_df,
+                            lat="latitude",
+                            lon="longitude",
+                            color="magnitude",
+                            size="magnitude",
+                            size_max=15,
+                            hover_name="place",
+                            hover_data=["time", "type", "depth"],
+                            color_continuous_scale=px.colors.sequential.Plasma,
+                            zoom=1,
+                            height=500,
+                            mapbox_style="carto-darkmatter"
+                        )
+                        
+                        fig_alerts.update_layout(
+                            margin={"r":0,"t":0,"l":0,"b":0},
+                            coloraxis_colorbar=dict(
+                                title="Magnitude",
+                                x=0.85,
+                                xanchor='left'
+                            )
+                        )
+                        
+                        st.plotly_chart(fig_alerts, use_container_width=True)
+                    else:
+                        # If coordinates aren't available in the alerts_df, extract them from the place field or show a message
+                        st.info("Map view not available - geographic coordinates not found in the data")
+            else:
+                st.info("No USGS alerts available or could not retrieve data")
+            
+            # Link to USGS website
+            st.markdown("[Visit USGS Website for more information](https://earthquake.usgs.gov/earthquakes/map/)")
+
+            # -------------------------------------------------
+            # EMSC Latest Earthquakes Table
+            # -------------------------------------------------
+            st.markdown("### 🌎 EMSC Latest Earthquakes")
+            st.markdown("Showing the most recent earthquakes from the European-Mediterranean Seismological Centre")
+            
+            @st.cache_data(ttl=300)  # Cache for 5 minutes
+            def get_emsc_latest_earthquakes():
                 try:
-                    # URL de EMSC para eventos recientes
-                    emsc_url = "https://www.emsc-csem.org/service/rss/rss.php?typ=emsc&magmin=4"
+                    # EMSC provides a JSON feed for latest earthquakes
+                    # This is the official API endpoint used by the EMSC website
+                    url = "https://www.seismicportal.eu/fdsnws/event/1/query?format=json&limit=10"
+                    response = requests.get(url, timeout=15)
+                    response.raise_for_status()
+                    data = response.json()
                     
-                    # Mostrar estado de carga
-                    st.info("Servicio de alertas EMSC no disponible en esta versión")
-                    st.markdown("""
-                    El Centro Sismológico Euro-Mediterráneo (EMSC) proporciona datos de terremotos 
-                    que ocurren principalmente en la región europea y mediterránea.
-                    
-                    Para implementar completamente esta fuente, se requiere un parser XML para el feed RSS de EMSC.
-                    """)
+                    earthquakes = []
+                    if 'features' in data:
+                        for feature in data['features']:
+                            props = feature['properties']
+                            geometry = feature['geometry']
+                            
+                            # Extract coordinates
+                            coordinates = geometry.get('coordinates', [0, 0, 0])
+                            
+                            earthquakes.append({
+                                'time': props.get('time', ''),
+                                'magnitude': props.get('mag', 0),
+                                'depth': props.get('depth', 0),
+                                'region': props.get('flynn_region', props.get('region', '')),
+                                'latitude': coordinates[1] if len(coordinates) > 1 else 0,
+                                'longitude': coordinates[0] if len(coordinates) > 0 else 0,
+                                'auth': props.get('auth', '')
+                            })
+                    return earthquakes
                 except Exception as e:
-                    st.error(f"Error en fuente EMSC: {e}")
+                    st.error(f"Error retrieving EMSC data: {e}")
+                    return []
             
-            # Sección de información sobre alertas
-            st.markdown("---")
-            st.subheader("Sistema de Nivel de Alerta")
+            # Get and display EMSC data
+            with st.spinner("Retrieving EMSC latest earthquakes..."):
+                emsc_earthquakes = get_emsc_latest_earthquakes()
             
-            # Crear una tabla de niveles de alerta
+            if emsc_earthquakes:
+                # Convert to DataFrame
+                emsc_df = pd.DataFrame(emsc_earthquakes)
+                
+                # Process time column
+                if 'time' in emsc_df.columns:
+                    try:
+                        # EMSC time format is ISO 8601
+                        emsc_df['time'] = pd.to_datetime(emsc_df['time'])
+                    except:
+                        pass
+                
+                # Show high magnitude alerts first
+                high_mag_emsc = [eq for eq in emsc_earthquakes if eq.get('magnitude', 0) >= 6.0]
+                for eq in high_mag_emsc:
+                    mag = eq.get('magnitude', 0)
+                    region = eq.get('region', "Unknown location")
+                    time = eq.get('time', "")
+                    if mag >= 7.0:
+                        st.error(f"🔴 ⚠️ CRITICAL ALERT: Magnitude {mag:.1f} in {region} ({time}) [EMSC]")
+                    elif mag >= 6.0:
+                        st.warning(f"🟠 ⚠️ HIGH ALERT: Magnitude {mag:.1f} in {region} ({time}) [EMSC]")
+                
+                # Display the data with fixed height
+                st.dataframe(
+                    emsc_df.rename(columns={
+                        'time': 'Time',
+                        'magnitude': 'Magnitude',
+                        'depth': 'Depth (km)',
+                        'region': 'Region',
+                        'auth': 'Agency'
+                    }),
+                    use_container_width=True,
+                    height=400  # Fixed height
+                )
+                
+                # Draw a map of the latest EMSC earthquakes
+                st.subheader("EMSC Latest Earthquakes Map")
+                
+                fig_emsc = px.scatter_mapbox(
+                    emsc_df,
+                    lat="latitude",
+                    lon="longitude",
+                    color="magnitude",
+                    size="magnitude",
+                    hover_name="region",
+                    hover_data=["time", "depth", "auth"],
+                    color_continuous_scale=px.colors.sequential.Plasma,
+                    zoom=1,
+                    height=500
+                )
+                
+                fig_emsc.update_layout(
+                    mapbox_style="carto-darkmatter",
+                    margin={"r":0,"t":0,"l":0,"b":0}
+                )
+                
+                st.plotly_chart(fig_emsc, use_container_width=True)
+            else:
+                st.info("No EMSC earthquake data available or could not retrieve data")
+            
+            # Link to EMSC website
+            st.markdown("[Visit EMSC Website for more information](https://www.emsc-csem.org/)")
+
+            # -------------------------------------------------
+            # EMSC Real-Time Feed Section
+            # -------------------------------------------------
+            st.markdown("### 🌍 EMSC Real-Time Earthquake Feed")
+            st.markdown("""
+            This section connects to EMSC's real-time WebSocket feed showing earthquakes as they happen around the world. 
+            Events appear in real-time without needing to refresh.
+            """)
+
+            # EMSC WebSocket configuration
+            emsc_ws_status = st.empty()
+
+            # Store events in session_state for persistence between refreshes
+            if "emsc_events" not in st.session_state:
+                st.session_state.emsc_events = []
+
+            # Initialize controls to filter events
+            magnitude_filter = st.slider(
+                "Filter by minimum magnitude",
+                min_value=1.0,
+                max_value=8.0,
+                value=4.5,
+                step=0.5,
+                key="emsc_mag_filter"
+            )
+            
+            # Option to clear events
+            if st.button("Clear Events"):
+                st.session_state.emsc_events = []
+                st.success("Event list cleared")
+
+            # Class to handle WebSocket connection in a separate thread
+            class EMSCWebSocketClient:
+                def __init__(self):
+                    self.echo_uri = 'wss://www.seismicportal.eu/standing_order/websocket'
+                    self.connected = False
+                    self.thread = None
+                    self.events = []
+                
+                def start(self):
+                    if self.thread is None or not self.thread.is_alive():
+                        self.thread = threading.Thread(target=self._run_websocket, daemon=True)
+                        self.thread.start()
+                        
+                def _process_message(self, message):
+                    try:
+                        data = json.loads(message)
+                        if 'data' in data and 'properties' in data['data']:
+                            info = data['data']['properties']
+                            action = data['action'] if 'action' in data else 'unknown'
+                        
+                            # Create event dictionary
+                            event = {
+                                "time": info.get("time", ""),
+                                "magnitude": float(info.get("mag", 0)),
+                                "region": info.get("flynn_region", info.get("region", "")),
+                                "depth": float(info.get("depth", 0)),
+                                "lat": info.get("lat", 0),
+                                "lon": info.get("lon", 0),
+                                "action": action,
+                                "id": info.get("unid", ""),
+                                "timestamp": pd.Timestamp.now().strftime("%H:%M:%S"),
+                                "source": info.get("auth", "EMSC")
+                            }
+                            
+                            # Add to session state instead of local list
+                            if "emsc_events" in st.session_state:
+                                # Only add event if it doesn't already exist (check by ID)
+                                ids = [e.get('id', '') for e in st.session_state.emsc_events]
+                                if event['id'] not in ids:
+                                    st.session_state.emsc_events.insert(0, event)
+                                    # Limit to 100 events
+                                    if len(st.session_state.emsc_events) > 100:
+                                        st.session_state.emsc_events = st.session_state.emsc_events[:100]
+                    except Exception as e:
+                        print(f"Error processing WebSocket message: {e}")
+                
+                def _run_websocket(self):
+                    import websocket
+                    
+                    def on_message(ws, message):
+                        self._process_message(message)
+                        
+                    def on_error(ws, error):
+                        print(f"WebSocket error: {error}")
+                        self.connected = False
+                        
+                    def on_close(ws, close_status_code, close_msg):
+                        print("WebSocket connection closed")
+                        self.connected = False
+                        
+                    def on_open(ws):
+                        print("WebSocket connection opened")
+                        self.connected = True
+                    
+                    # Connect to WebSocket
+                    ws = websocket.WebSocketApp(
+                        self.echo_uri,
+                        on_message=on_message,
+                        on_error=on_error,
+                        on_close=on_close,
+                        on_open=on_open
+                    )
+                    
+                    ws.run_forever()
+
+            # Create and start WebSocket client
+            if "ws_client" not in st.session_state:
+                st.session_state.ws_client = EMSCWebSocketClient()
+                st.session_state.ws_client.start()
+                # Changed to success (green background) as requested
+                emsc_ws_status.success("✓ Connected to EMSC real-time feed")
+            
+            # Get filtered events from session_state
+            filtered_events = [
+                event for event in st.session_state.emsc_events 
+                if event.get('magnitude', 0) >= magnitude_filter
+            ]
+            
+            # Display events
+            if filtered_events:
+                # Create a styled container for real-time events
+                event_container = st.container()
+                with event_container:
+                    # First show high-magnitude alerts
+                    high_mag_events = [e for e in filtered_events if e.get('magnitude', 0) >= 6.0]
+                    for event in high_mag_events:
+                        mag = event.get('magnitude', 0)
+                        region = event.get('region', "Unknown location")
+                        time = event.get('time', "")
+                        if mag >= 7.0:
+                            st.error(f"🔴 ⚠️ CRITICAL ALERT: Magnitude {mag:.1f} in {region} ({time}) [EMSC]")
+                        elif mag >= 6.0:
+                            st.warning(f"🟠 ⚠️ HIGH ALERT: Magnitude {mag:.1f} in {region} ({time}) [EMSC]")
+                    
+                    # Then show table of events with fixed height
+                    events_df = pd.DataFrame(filtered_events)
+                    if not events_df.empty:
+                        display_cols = ["time", "magnitude", "region", "depth", "action", "source"]
+                        display_cols = [col for col in display_cols if col in events_df.columns]
+                        st.dataframe(
+                            events_df[display_cols], 
+                            use_container_width=True,
+                            height=400  # Fixed height to prevent excessive scrolling
+                        )
+            else:
+                # Changed to warning (yellow background) as requested
+                st.warning("Waiting for earthquakes meeting the magnitude threshold...")
+
+            # -------------------------------------------------
+            # Alert System Information
+            # -------------------------------------------------
+            st.markdown("## Alert System Information")
+            
+            # Alert Levels
+            st.markdown("### Alert Levels")
             alert_data = {
-                "Nivel de Alerta": ["Baja", "Media", "Alta", "Crítica"],
-                "Magnitud": ["< 5.0", "5.0 - 5.9", "6.0 - 6.9", "≥ 7.0"],
-                "Notificación": ["Informativa", "Advertencia", "Alerta", "Emergencia"],
-                "Indicador Visual": ["🔵", "🟡", "🟠", "🔴"]
+                "Level": ["Info", "Warning", "Alert", "Critical"],
+                "Magnitude": ["< 5.0", "5.0 - 5.9", "6.0 - 6.9", "≥ 7.0"],
+                "Color": ["Blue", "Yellow", "Orange", "Red"],
+                "Icon": ["🔵", "🟡", "🟠", "🔴"]
             }
-            alert_df = pd.DataFrame(alert_data)
+            st.dataframe(pd.DataFrame(alert_data), use_container_width=True)
             
-            # Aplicar colores a los niveles de alerta
-            st.dataframe(alert_df, use_container_width=True)
+            # Early Warning Systems
+            st.markdown("### About Early Warning Systems")
+            st.markdown("""
+            Earthquake early warning systems detect the initial seismic waves (P waves) that travel faster 
+            but cause less damage, providing a brief window of seconds to minutes before the more destructive 
+            waves (S waves) arrive.
             
-            # Añadir información sobre sistemas de alerta temprana
-            with st.expander("ℹ️ Sobre Sistemas de Alerta Sísmica"):
-                st.markdown("""
-                ### Sistemas de Alerta Temprana de Terremotos
-                
-                Los sistemas de alerta temprana detectan las primeras ondas sísmicas (P) que viajan más rápido pero causan menos daño, 
-                proporcionando segundos o incluso minutos de advertencia antes de la llegada de las ondas S más destructivas.
-                
-                #### Principales sistemas en operación:
-                
-                - **ShakeAlert** (USA) - Operado por USGS
-                - **Sistema de Alerta Sísmica Mexicano** (México)
-                - **J-ALERT** (Japón)
-                - **Sistema Nacional de Alerta de Terremotos de Taiwan**
-                
-                Las alertas tempranas permiten acciones como:
-                - Detener trenes y elevadores
-                - Cerrar válvulas de gas e infraestructura crítica
-                - Permitir a las personas buscar refugio
-                
-                > **Nota**: Este panel muestra alertas históricos y no proporciona alertas en tiempo real para emergencias.
-                """)
+            Major systems currently in operation:
+            - ShakeAlert (USA)
+            - Sistema de Alerta Sísmica Mexicano (Mexico)
+            - Earthquake Early Warning System (Japan)
+            """)
+            
+            st.warning("""
+            **Disclaimer:** This dashboard displays earthquake data with minimal delay, but it is NOT 
+            an official early warning system. For official alerts, follow guidance from your local 
+            geological survey or emergency management agency.
+            """)
 
         # --- Historical Earthquake Analysis Tab ---
         with main_tabs[5]:
             st.title("Historical Earthquake Analysis (2005-2025)")
+            
+            # Add introduction text as requested
+            st.markdown("""
+            ## Introduction to Historical Analysis
+            
+            This section analyzes the 500 most powerful earthquakes recorded globally over the last two decades (2005-2025). 
+            By examining these significant seismic events, we can identify patterns, recurring cycles, and geographic 
+            distributions that contribute to our understanding of earthquake behavior. This historical perspective 
+            provides valuable context for current seismic activity and supports more informed forecasting.
+            
+            The data is filtered to include only major earthquakes (primarily with magnitudes above 5.5) to focus on 
+            events with significant impact. Through various visualizations and analyses, you can explore temporal trends, 
+            geographic correlations, and recurrence intervals of powerful earthquakes across different tectonic regions.
+            """)
             
             # Load historical data - dataset completamente independiente
             @st.cache_data(ttl=3600, show_spinner=False)
@@ -2982,40 +3474,27 @@ if df is not None and not df.empty:
                 # A partir de aquí, trabajar exclusivamente con data_historic y major_quakes
                 # sin hacer referencia a filtered_df en ningún momento
                 
-                # Código para mostrar análisis históricos...
-                # ...
-                # Display loading info
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.info(f"Loaded {len(data_historic)} significant earthquakes (M>5.5) from 2005-2025")
-                with col2:
-                    st.warning("⚠️ Historical analysis is based on past events and patterns, not real-time data")
-                
-                # Check for duplicates and inform the user (now handled in the process_historical_data function)
-                duplicates = len(df_historic) - len(data_historic)
-                if duplicates > 0:
-                    st.warning(f"Removed {duplicates} duplicate or invalid entries from the dataset")
-                    # Define tectonic regions function
-                    def categorize_region(lat, lon):
+                # Define tectonic regions function
+                def categorize_region(lat, lon):
                     # Pacific Ring of Fire
-                        if ((lon > 120 or lon < -120) and (lat > -60 and lat < 60)):
-                            return "Pacific West" if lon > 120 else "Pacific East"
-                        # Mediterranean-Caucasus
-                        elif ((lat > 30 and lat < 45) and (lon > -10 and lon < 50)):
-                            return "Mediterranean-Caucasus"
-                        # Indonesia-Himalaya Belt
-                        elif ((lat > -10 and lat < 45) and (lon > 70 and lon < 120)):
-                            return "Indonesia-Himalaya"
-                        # Other regions
-                        else:
-                            return "Other Regions"
+                    if ((lon > 120 or lon < -120) and (lat > -60 and lat < 60)):
+                        return "Pacific West" if lon > 120 else "Pacific East"
+                    # Mediterranean-Caucasus
+                    elif ((lat > 30 and lat < 45) and (lon > -10 and lon < 50)):
+                        return "Mediterranean-Caucasus"
+                    # Indonesia-Himalaya Belt
+                    elif ((lat > -10 and lat < 45) and (lon > 70 and lon < 120)):
+                        return "Indonesia-Himalaya"
+                    # Other regions
+                    else:
+                        return "Other Regions"
                 
-                    # Apply regional categorizations
-                    data_historic['region'] = data_historic.apply(lambda x: categorize_region(x['latitude'], x['longitude']), axis=1)
-                    major_quakes['region'] = major_quakes.apply(lambda x: categorize_region(x['latitude'], x['longitude']), axis=1)
+                # Apply regional categorizations
+                data_historic['region'] = data_historic.apply(lambda x: categorize_region(x['latitude'], x['longitude']), axis=1)
+                major_quakes['region'] = major_quakes.apply(lambda x: categorize_region(x['latitude'], x['longitude']), axis=1)
                 
-                    # Add tectonic region classification
-                    data_historic['tectonic_region'] = data_historic.apply(lambda x: 
+                # Add tectonic region classification
+                data_historic['tectonic_region'] = data_historic.apply(lambda x: 
                     'Ring of Fire' if ((x['longitude'] > 120 and x['longitude'] < 180) or 
                             (x['longitude'] < -120 and x['longitude'] > -180)) and 
                             (x['latitude'] > -60 and x['latitude'] < 60) else
@@ -3027,141 +3506,138 @@ if df is not None and not df.empty:
                                 (x['latitude'] > -60 and x['latitude'] < 80) else
                     'Other Tectonic Regions', axis=1)
                 
-                    # Add rounded coordinates for hotspot analysis
-                    data_historic['lat_rounded'] = round(data_historic['latitude'], 1)
-                    data_historic['lon_rounded'] = round(data_historic['longitude'], 1)
+                # Add rounded coordinates for hotspot analysis
+                data_historic['lat_rounded'] = round(data_historic['latitude'], 1)
+                data_historic['lon_rounded'] = round(data_historic['longitude'], 1)
 
-                    # Calculate time between major earthquakes in the same region
-                    if len(major_quakes) > 1:
-                        major_quakes = major_quakes.sort_values(by=['region', 'time'])
-                        major_quakes['years_since_last'] = major_quakes.groupby('region')['time'].diff().dt.total_seconds() / (365.25 * 24 * 60 * 60)
+                # Calculate time between major earthquakes in the same region
+                if len(major_quakes) > 1:
+                    major_quakes = major_quakes.sort_values(by=['region', 'time'])
+                    major_quakes['years_since_last'] = major_quakes.groupby('region')['time'].diff().dt.total_seconds() / (365.25 * 24 * 60 * 60)
                 
-                    # Create subtabs within the historical analysis tab
-                    hist_tabs = st.tabs([
+                # Create subtabs within the historical analysis tab
+                hist_tabs = st.tabs([
                     "📊 Overview", 
                     "🗺️ Global Distribution", 
                     "📈 Time Patterns", 
                     "🌋 Major Events", 
                     "🔮 Recurrence Analysis"
-                    ])
+                ])
                 
-                    # Tab 1: Overview
-                    with hist_tabs[0]:
-                        st.header("Historical Earthquake Overview")
-                        
-                        # Calculate key metrics
-                        col1, col2, col3, col4 = st.columns(4)
-                        
-                        with col1:
-                            st.metric("Total Earthquakes (>5.5)",
+                # Tab 1: Overview
+                with hist_tabs[0]:
+                    st.header("Historical Earthquake Overview")
+                    
+                    # Calculate key metrics
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
+                        st.metric("Total Earthquakes (>5.5)",
                             value=f"{len(data_historic):,}",
                             delta=None
-                            )
-                        
-                        with col2:
-                            st.metric("Average Magnitude",
+                        )
+                    
+                    with col2:
+                        st.metric("Average Magnitude",
                             value=f"{data_historic['mag'].mean():.2f}",
                             delta=None
-                            )
-                        
-                        with col3:
-                            st.metric("Maximum Magnitude",
+                        )
+                    
+                    with col3:
+                        st.metric("Maximum Magnitude",
                             value=f"{data_historic['mag'].max():.1f}",
                             delta=None
-                            )
-                        
-                        with col4:
-                            most_active_year = data_historic['year'].value_counts().idxmax()
-                            st.metric("Most Active Year",
+                        )
+                    
+                    with col4:
+                        most_active_year = data_historic['year'].value_counts().idxmax()
+                        st.metric("Most Active Year",
                             value=f"{most_active_year}",
                             delta=f"{data_historic[data_historic['year']==most_active_year].shape[0]} events"
-                            )
-                        
-                        # Magnitude distribution
-                        st.subheader("Magnitude Distribution")
-                        fig_mag_dist = px.histogram(
-                            data_historic, 
-                            x="mag", 
-                            nbins=30, 
-                            color="magnitude_category",
-                            color_discrete_sequence=px.colors.sequential.Plasma,
-                           
                         )
-                        fig_mag_dist.add_vline(x=7.0, line_dash="dash", line_color="red", annotation_text="Major (7+)")
-                        st.plotly_chart(fig_mag_dist, use_container_width=True)
-                        
-                        # Tectonic regions
-                        st.subheader("Distribution by Tectonic Region")
-                        region_counts = data_historic['tectonic_region'].value_counts().reset_index()
-                        region_counts.columns = ['Region', 'Count']
-                        
-                        fig_region = px.pie(
-                            region_counts, 
-                            values='Count', 
-                            names='Region',
-                            color_discrete_sequence=px.colors.sequential.Plasma,
-                            hole=0.4
-                        )
-                        fig_region.update_traces(textposition='inside', textinfo='percent+label')
-                        st.plotly_chart(fig_region, use_container_width=True)
-                        
-                        # Yearly trend
-                        st.subheader("Yearly Trend")
-                        yearly_counts = data_historic.groupby('year').size().reset_index(name='count')
-                        
-                        fig_yearly = px.line(
-                            yearly_counts, 
-                            x='year', 
-                            y='count',
-                            markers=True,
-                            line_shape='spline',
-                           
-                            labels={'year': 'Year', 'count': 'Number of Earthquakes'}
-                        )
-                        
-                        # Add trendline
-                        x = yearly_counts['year']
-                        y = yearly_counts['count']
-                        z = np.polyfit(x, y, 1)
-                        p = np.poly1d(z)
-                        fig_yearly.add_traces(
-                            go.Scatter(
+                    
+                    # Magnitude distribution
+                    st.subheader("Magnitude Distribution")
+                    fig_mag_dist = px.histogram(
+                        data_historic, 
+                        x="mag", 
+                        nbins=30, 
+                        color="magnitude_category",
+                        color_discrete_sequence=px.colors.sequential.Plasma
+                    )
+                    fig_mag_dist.add_vline(x=7.0, line_dash="dash", line_color="red", annotation_text="Major (7+)")
+                    st.plotly_chart(fig_mag_dist, use_container_width=True)
+                    
+                    # Tectonic regions
+                    st.subheader("Distribution by Tectonic Region")
+                    region_counts = data_historic['tectonic_region'].value_counts().reset_index()
+                    region_counts.columns = ['Region', 'Count']
+                    
+                    fig_region = px.pie(
+                        region_counts, 
+                        values='Count', 
+                        names='Region',
+                        color_discrete_sequence=px.colors.sequential.Plasma,
+                        hole=0.4
+                    )
+                    fig_region.update_traces(textposition='inside', textinfo='percent+label')
+                    st.plotly_chart(fig_region, use_container_width=True)
+                    
+                    # Yearly trend
+                    st.subheader("Yearly Trend")
+                    yearly_counts = data_historic.groupby('year').size().reset_index(name='count')
+                    
+                    fig_yearly = px.line(
+                        yearly_counts, 
+                        x='year', 
+                        y='count',
+                        markers=True,
+                        line_shape='spline',
+                        labels={'year': 'Year', 'count': 'Number of Earthquakes'}
+                    )
+                    
+                    # Add trendline
+                    x = yearly_counts['year']
+                    y = yearly_counts['count']
+                    z = np.polyfit(x, y, 1)
+                    p = np.poly1d(z)
+                    fig_yearly.add_traces(
+                        go.Scatter(
                             x=x,
                             y=p(x),
                             mode='lines',
                             line=dict(color='red', dash='dash'),
                             name='Trend'
-                            )
                         )
-                        
-                        st.plotly_chart(fig_yearly, use_container_width=True)
+                    )
+                    
+                    st.plotly_chart(fig_yearly, use_container_width=True)
                 
-                    # Tab 2: Global Distribution
-                    with hist_tabs[1]:
-                        st.header("Global Distribution of Significant Earthquakes")
-                        
-                        # Create a modern interactive map
-                        st.markdown("### Earthquake Distribution Map (2005-2025)")
-                        
-                        fig_map = px.scatter_geo(
-                            data_historic,
-                            lat="latitude",
-                            lon="longitude",
-                            color="mag",
-                            size="mag",
-                            hover_name="place",
-                            hover_data=["time", "mag", "depth"],
-                         
-                            color_continuous_scale=px.colors.sequential.Plasma,
-                            projection="natural earth",
-                            size_max=20
-                        )
-                        
-                        # Highlight the top 5 strongest earthquakes
-                        top_earthquakes = data_historic.nlargest(5, 'mag')
-                        
-                        for _, row in top_earthquakes.iterrows():
-                            fig_map.add_trace(go.Scattergeo(
+                # Tab 2: Global Distribution
+                with hist_tabs[1]:
+                    st.header("Global Distribution of Significant Earthquakes")
+                    
+                    # Create a modern interactive map
+                    st.markdown("### Earthquake Distribution Map (2005-2025)")
+                    
+                    fig_map = px.scatter_geo(
+                        data_historic,
+                        lat="latitude",
+                        lon="longitude",
+                        color="mag",
+                        size="mag",
+                        hover_name="place",
+                        hover_data=["time", "mag", "depth"],
+                        color_continuous_scale=px.colors.sequential.Plasma,
+                        projection="natural earth",
+                        size_max=20
+                    )
+                    
+                    # Highlight the top 5 strongest earthquakes
+                    top_earthquakes = data_historic.nlargest(5, 'mag')
+                    
+                    for _, row in top_earthquakes.iterrows():
+                        fig_map.add_trace(go.Scattergeo(
                             lat=[row['latitude']],
                             lon=[row['longitude']],
                             mode='markers+text',
@@ -3177,12 +3653,12 @@ if df is not None and not df.empty:
                             name=f"M{row['mag']:.1f} - {row['place']}",
                             hovertext=f"Magnitude: {row['mag']}<br>Date: {row['time']}<br>Place: {row['place']}",
                             hoverinfo="text"
-                            ))
-                        
-                        # Update layout for dark theme
-                        fig_map.update_layout(
-                            height=600,
-                            geo=dict(
+                        ))
+                    
+                    # Update layout for dark theme and REMOVE LEGEND as requested
+                    fig_map.update_layout(
+                        height=600,
+                        geo=dict(
                             showland=True,
                             landcolor="#d2b48c",
                             showocean=True,
@@ -3193,361 +3669,467 @@ if df is not None and not df.empty:
                             coastlinecolor="white",
                             bgcolor="black",
                             projection_scale=1
-                            ),
-                            paper_bgcolor="black",
-                            plot_bgcolor="black",
-                            title_font=dict(size=20, color='white')
-                        )
-                        
-                        st.plotly_chart(fig_map, use_container_width=True)
-                        
-                        # Heat map of activity
-                        st.subheader("Earthquake Density Heatmap")
-                        st.markdown("This visualization shows the concentration of seismic activity around the world")
-                        
-                        # Create a heat map using density_mapbox
-                        fig_heat = px.density_mapbox(
-                            data_historic,
-                            lat="latitude",
-                            lon="longitude",
-                            z="mag",  # Weight points by magnitude
-                            radius=10,
-                            center=dict(lat=0, lon=0),
-                            zoom=0.5,
-                            mapbox_style="carto-darkmatter",
-                            
-                            color_continuous_scale='Inferno'
-                        )
-                        
-                        fig_heat.update_layout(height=500)
-                        st.plotly_chart(fig_heat, use_container_width=True)
-                        
-                        # Cluster analysis
-                        st.subheader("Regional Cluster Analysis")
-                        
-                        # Create a clustered view of earthquake hotspots
-                        cluster_df = data_historic[['latitude', 'longitude']].copy()
-                        scaler = StandardScaler()
-                        cluster_data = scaler.fit_transform(cluster_df)
-                        
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            eps_distance = st.slider(
+                        ),
+                        paper_bgcolor="black",
+                        plot_bgcolor="black",
+                        title_font=dict(size=20, color='white'),
+                        showlegend=False  # Remove legend as requested
+                    )
+                    
+                    st.plotly_chart(fig_map, use_container_width=True)
+                    
+                    # Heat map of activity
+                    st.subheader("Earthquake Density Heatmap")
+                    st.markdown("This visualization shows the concentration of seismic activity around the world")
+                    
+                    # Create a heat map using density_mapbox
+                    fig_heat = px.density_mapbox(
+                        data_historic,
+                        lat="latitude",
+                        lon="longitude",
+                        z="mag",  # Weight points by magnitude
+                        radius=10,
+                        center=dict(lat=0, lon=0),
+                        zoom=0.5,
+                        mapbox_style="carto-darkmatter",
+                        color_continuous_scale='Inferno'
+                    )
+                    
+                    fig_heat.update_layout(height=500)
+                    st.plotly_chart(fig_heat, use_container_width=True)
+                    
+                    # Cluster analysis
+                    st.subheader("Regional Cluster Analysis")
+                    
+                    # Create a clustered view of earthquake hotspots
+                    cluster_df = data_historic[['latitude', 'longitude']].copy()
+                    scaler = StandardScaler()
+                    cluster_data = scaler.fit_transform(cluster_df)
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        eps_distance = st.slider(
                             "Maximum distance between events (eps)",
                             min_value=0.05,
                             max_value=1.0,
                             value=0.2,
                             step=0.05,
                             key="hist_eps"
-                            )
-                        with col2:
-                            min_samples = st.slider(
+                        )
+                    with col2:
+                        min_samples = st.slider(
                             "Minimum samples per cluster",
                             min_value=2,
                             max_value=20,
                             value=5,
                             step=1,
                             key="hist_min_samples"
-                            )
-                        
-                        with st.spinner("Performing cluster analysis..."):
-                            dbscan = DBSCAN(eps=eps_distance, min_samples=min_samples)
-                            data_historic['cluster'] = dbscan.fit_predict(cluster_data)
-                        
-                        n_clusters = len(set(data_historic['cluster'])) - (1 if -1 in data_historic['cluster'] else 0)
-                        n_noise = list(data_historic['cluster']).count(-1)
-                        
-                        col1, col2 = st.columns(2)
-                        col1.metric("Identified clusters", n_clusters)
-                        col2.metric("Ungrouped events", n_noise)
-                        
-                        # Create cluster names based on regions
-                        cluster_names = {}
-                        for cluster_id in sorted(set(data_historic['cluster'])):
-                            if cluster_id == -1:
-                                cluster_names[cluster_id] = "Ungrouped"
-                            else:
-                            # Get the most common place in this cluster
-                                cluster_df = data_historic[data_historic['cluster'] == cluster_id]
-                                most_common_place = cluster_df['place'].str.split(', ').str[-1].mode().iloc[0]
-                                cluster_names[cluster_id] = f"Cluster {cluster_id}: {most_common_place}"
-                        
-                        data_historic['cluster_name'] = data_historic['cluster'].map(cluster_names)
-                        
-                        # Plot the clusters
-                        fig_cluster = px.scatter_geo(
-                            data_historic,
-                            lat="latitude",
-                            lon="longitude",
-                            color="cluster_name",
-                            size="mag",
-                            hover_name="place",
-                            hover_data=["time", "mag", "depth"],
-                            title=f"Earthquake Clusters (Found {n_clusters} clusters)",
-                            projection="natural earth"
-                        )
-                        
-                        fig_cluster.update_layout(height=600)
-                        st.plotly_chart(fig_cluster, use_container_width=True)
-                
-                    # Tab 3: Time Patterns
-                    with hist_tabs[2]:
-                        st.header("Temporal Patterns in Earthquake Occurrence")
-                        
-                        # Monthly distribution
-                        st.subheader("Monthly Distribution")
-                        monthly_counts = data_historic.groupby('month').size().reset_index(name='count')
-                        month_names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-                        monthly_counts['month_name'] = monthly_counts['month'].apply(lambda x: month_names[x-1])
-                        
-                        fig_monthly = px.bar(
-                            monthly_counts,
-                            x='month_name',
-                            y='count',
-                            color='count',
-                            color_continuous_scale=px.colors.sequential.Plasma,
-                            
-                            labels={'count': 'Number of Events', 'month_name': 'Month'}
-                        )
-                        st.plotly_chart(fig_monthly, use_container_width=True)
-                        
-                        # Hourly distribution
-                        st.subheader("Distribution by Hour of Day")
-                        hourly_counts = data_historic.groupby('hour').size().reset_index(name='count')
-                        
-                        fig_hourly = px.line(
-                            hourly_counts,
-                            x='hour',
-                            y='count',
-                            markers=True,
-                           
-                            labels={'count': 'Number of Events', 'hour': 'Hour of Day (UTC)'}
-                        )
-                        
-                        # Fill area under the line
-                        fig_hourly.update_traces(fill='tozeroy', fillcolor='rgba(128, 0, 128, 0.2)')
-                        st.plotly_chart(fig_hourly, use_container_width=True)
-                        
-                        # Relation between depth and magnitude over time
-                        st.subheader("Depth vs Magnitude Over Time")
-                        
-                        # Create 3D scatter plot
-                        fig_3d = px.scatter_3d(
-                            data_historic.sort_values('time'),
-                            x='time', 
-                            y='depth', 
-                            z='mag',
-                            color='mag',
-                            size='mag',
-                            opacity=0.7,
-                            color_continuous_scale=px.colors.sequential.Plasma,
-                           
-                            labels={
-                            'time': 'Date',
-                            'depth': 'Depth (km)',
-                            'mag': 'Magnitude'
-                            }
-                        )
-                        
-                        fig_3d.update_layout(height=700)
-                        st.plotly_chart(fig_3d, use_container_width=True)
-                        
-                        # Magnitude-depth relationship
-                        st.subheader("Relationship Between Magnitude and Depth")
-                        
-                        fig_md = px.scatter(
-                            data_historic,
-                            x='mag',
-                            y='depth',
-                            color='tectonic_region',
-                            size='mag',
-                           
-                            labels={'mag': 'Magnitude', 'depth': 'Depth (km)'}
-                        )
-                        
-                        # Invert y-axis to show depth increasing downward
-                        fig_md.update_yaxes(autorange="reversed")
-                        
-                        # Add trendline
-                        fig_md.update_layout(height=600)
-                        fig_md.update_traces(marker=dict(line=dict(width=1, color='DarkSlateGrey')))
-                        st.plotly_chart(fig_md, use_container_width=True)
-                
-                    # Tab 4: Major Events
-                    with hist_tabs[3]:
-                        st.header("Analysis of Major Earthquakes (M≥7.0)")
-                        
-                        # Count and basic stats
-                        major_count = len(major_quakes)
-                        
-                        st.metric(
-                            label="Total Major Earthquakes (M≥7.0)",
-                            value=f"{major_count}",
-                            delta=f"{(major_count/len(data_historic)*100):.1f}% of all events"
-                        )
-                        
-                        # Map of major earthquakes
-                        st.subheader("Global Distribution of Major Earthquakes")
-                        
-                        fig_major = px.scatter_geo(
-                            major_quakes,
-                            lat="latitude",
-                            lon="longitude",
-                            color="mag",
-                            size="mag",
-                            hover_name="place",
-                            hover_data=["time", "mag", "depth"],
-                           
-                            color_continuous_scale="Viridis",
-                            projection="natural earth",
-                            size_max=25
-                        )
-                        
-                        fig_major.update_layout(
-                            height=600,
-                            geo=dict(
-                            showland=True,
-                            landcolor="#d2b48c",
-                            showocean=True,
-                            oceancolor="#002244",
-                            showcountries=True,
-                            countrycolor="white",
-                            showcoastlines=True,
-                            coastlinecolor="white",
-                            bgcolor="black"
-                            ),
-                            paper_bgcolor="black",
-                            plot_bgcolor="black"
-                        )
-                        
-                        st.plotly_chart(fig_major, use_container_width=True)
-                        
-                        # Distribution by region
-                        st.subheader("Major Events by Region")
-                        
-                        region_major = major_quakes['region'].value_counts().reset_index()
-                        region_major.columns = ['Region', 'Count']
-                        
-                        fig_region_major = px.bar(
-                            region_major,
-                            x='Region',
-                            y='Count',
-                            color='Count',
-                            color_continuous_scale="Viridis",
-                           
-                        )
-                        
-                        st.plotly_chart(fig_region_major, use_container_width=True)
-                        
-                        # Timeline of major events
-                        st.subheader("Timeline of Major Earthquakes")
-                        
-                        fig_timeline = px.scatter(
-                            major_quakes.sort_values('time'),
-                            x='time',
-                            y='mag',
-                            color='region',
-                            size='mag',
-                            hover_name='place',
-                           
-                            labels={'time': 'Date', 'mag': 'Magnitude'}
-                        )
-                        
-                        # Add horizontal line at magnitude 8.0
-                        fig_timeline.add_hline(y=8.0, line_dash="dash", line_color="red", annotation_text="M8.0+")
-                        
-                        fig_timeline.update_layout(height=500)
-                        st.plotly_chart(fig_timeline, use_container_width=True)
-                        
-                        # Table of top 10 major events
-                        st.subheader("Top 10 Most Powerful Earthquakes (2005-2025)")
-                        
-                        top10 = major_quakes.nlargest(10, 'mag').reset_index(drop=True)
-                        top10['time'] = top10['time'].dt.strftime('%Y-%m-%d %H:%M:%S')
-                        
-                        # Add a rank column
-                        top10.index = top10.index + 1
-                        top10 = top10.rename_axis('Rank').reset_index()
-                        
-                        # Display the table
-                        st.dataframe(
-                            top10[['Rank', 'time', 'mag', 'place', 'depth']].rename(
-                            columns={'time': 'Date', 'mag': 'Magnitude', 'place': 'Location', 'depth': 'Depth (km)'}
-                            ),
-                            use_container_width=True
                         )
                     
-                    # Tab 5: Recurrence Analysis
-                    with hist_tabs[4]:
-                        st.header("Recurrence Analysis and Forecasting")
-                        
-                        st.info("""
-                        This analysis examines historical patterns of earthquake recurrence in different regions
-                        to estimate probabilities of future seismic events. These are statistical estimates based
-                        on historical data, not definitive predictions.
-                        """)
-                        
-                        # Calculate recurrence intervals for regions with significant activity
-                        st.subheader("Recurrence Analysis by Region")
-                        
-                        # Only analyze regions with multiple major events
-                        region_counts = major_quakes['region'].value_counts()
-                        regions_with_multiple = region_counts[region_counts >= 2].index.tolist()
-                        
-                        if not regions_with_multiple:
-                            st.warning("Not enough major earthquakes in any single region for recurrence analysis")
+                    with st.spinner("Performing cluster analysis..."):
+                        dbscan = DBSCAN(eps=eps_distance, min_samples=min_samples)
+                        data_historic['cluster'] = dbscan.fit_predict(cluster_data)
+                    
+                    n_clusters = len(set(data_historic['cluster'])) - (1 if -1 in data_historic['cluster'] else 0)
+                    n_noise = list(data_historic['cluster']).count(-1)
+                    
+                    col1, col2 = st.columns(2)
+                    col1.metric("Identified clusters", n_clusters)
+                    col2.metric("Ungrouped events", n_noise)
+                    
+                    # Create cluster names based on regions
+                    cluster_names = {}
+                    for cluster_id in sorted(set(data_historic['cluster'])):
+                        if cluster_id == -1:
+                            cluster_names[cluster_id] = "Ungrouped"
                         else:
-                            # Calculate recurrence statistics
-                            recurrence_data = []
+                        # Get the most common place in this cluster
+                            cluster_df = data_historic[data_historic['cluster'] == cluster_id]
+                            most_common_place = cluster_df['place'].str.split(', ').str[-1].mode().iloc[0]
+                            cluster_names[cluster_id] = f"Cluster {cluster_id}: {most_common_place}"
+                    
+                    data_historic['cluster_name'] = data_historic['cluster'].map(cluster_names)
+                    
+                    # Plot the clusters
+                    fig_cluster = px.scatter_geo(
+                        data_historic,
+                        lat="latitude",
+                        lon="longitude",
+                        color="cluster_name",
+                        size="mag",
+                        hover_name="place",
+                        hover_data=["time", "mag", "depth"],
+                        title=f"Earthquake Clusters (Found {n_clusters} clusters)",
+                        projection="natural earth"
+                    )
+                    
+                    fig_cluster.update_layout(height=600)
+                    st.plotly_chart(fig_cluster, use_container_width=True)
+                
+                # Tab 3: Time Patterns
+                with hist_tabs[2]:
+                    st.header("Temporal Patterns in Earthquake Occurrence")
+                    
+                    # Monthly distribution
+                    st.subheader("Monthly Distribution")
+                    monthly_counts = data_historic.groupby('month').size().reset_index(name='count')
+                    month_names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+                    monthly_counts['month_name'] = monthly_counts['month'].apply(lambda x: month_names[x-1])
+                    
+                    fig_monthly = px.bar(
+                        monthly_counts,
+                        x='month_name',
+                        y='count',
+                        color='count',
+                        color_continuous_scale=px.colors.sequential.Plasma,
+                        labels={'count': 'Number of Events', 'month_name': 'Month'}
+                    )
+                    st.plotly_chart(fig_monthly, use_container_width=True)
+                    
+                    # Hourly distribution
+                    st.subheader("Distribution by Hour of Day")
+                    hourly_counts = data_historic.groupby('hour').size().reset_index(name='count')
+                    
+                    fig_hourly = px.line(
+                        hourly_counts,
+                        x='hour',
+                        y='count',
+                        markers=True,
+                        labels={'count': 'Number of Events', 'hour': 'Hour of Day (UTC)'}
+                    )
+                    
+                    # Fill area under the line
+                    fig_hourly.update_traces(fill='tozeroy', fillcolor='rgba(128, 0, 128, 0.2)')
+                    st.plotly_chart(fig_hourly, use_container_width=True)
+                    
+                    # Relation between depth and magnitude over time
+                    st.subheader("Depth vs Magnitude Over Time")
+                    
+                    # Create 3D scatter plot
+                    fig_3d = px.scatter_3d(
+                        data_historic.sort_values('time'),
+                        x='time', 
+                        y='depth', 
+                        z='mag',
+                        color='mag',
+                        size='mag',
+                        opacity=0.7,
+                        color_continuous_scale=px.colors.sequential.Plasma,
+                        labels={
+                        'time': 'Date',
+                        'depth': 'Depth (km)',
+                        'mag': 'Magnitude'
+                        }
+                    )
+                    
+                    fig_3d.update_layout(height=700)
+                    st.plotly_chart(fig_3d, use_container_width=True)
+                    
+                    # Magnitude-depth relationship
+                    st.subheader("Relationship Between Magnitude and Depth")
+                    
+                    fig_md = px.scatter(
+                        data_historic,
+                        x='mag',
+                        y='depth',
+                        color='tectonic_region',
+                        size='mag',
+                        labels={'mag': 'Magnitude', 'depth': 'Depth (km)'}
+                    )
+                    
+                    # Invert y-axis to show depth increasing downward
+                    fig_md.update_yaxes(autorange="reversed")
+                    
+                    # Add trendline
+                    fig_md.update_layout(height=600)
+                    fig_md.update_traces(marker=dict(line=dict(width=1, color='DarkSlateGrey')))
+                    st.plotly_chart(fig_md, use_container_width=True)
+                
+                # Tab 4: Major Events
+                with hist_tabs[3]:
+                    st.header("Analysis of Major Earthquakes (M≥7.0)")
+                    
+                    # Count and basic stats
+                    major_count = len(major_quakes)
+                    
+                    st.metric(
+                        label="Total Major Earthquakes (M≥7.0)",
+                        value=f"{major_count}",
+                        delta=f"{(major_count/len(data_historic)*100):.1f}% of all events"
+                    )
+                    
+                    # Map of major earthquakes
+                    st.subheader("Global Distribution of Major Earthquakes")
+                    
+                    fig_major = px.scatter_geo(
+                        major_quakes,
+                        lat="latitude",
+                        lon="longitude",
+                        color="mag",
+                        size="mag",
+                        hover_name="place",
+                        hover_data=["time", "mag", "depth"],
+                        color_continuous_scale="Viridis",
+                        projection="natural earth",
+                        size_max=25
+                    )
+                    
+                    fig_major.update_layout(
+                        height=600,
+                        geo=dict(
+                        showland=True,
+                        landcolor="#d2b48c",
+                        showocean=True,
+                        oceancolor="#002244",
+                        showcountries=True,
+                        countrycolor="white",
+                        showcoastlines=True,
+                        coastlinecolor="white",
+                        bgcolor="black"
+                        ),
+                        paper_bgcolor="black",
+                        plot_bgcolor="black"
+                    )
+                    
+                    st.plotly_chart(fig_major, use_container_width=True)
+                    
+                    # Distribution by region
+                    st.subheader("Major Events by Region")
+                    
+                    region_major = major_quakes['region'].value_counts().reset_index()
+                    region_major.columns = ['Region', 'Count']
+                    
+                    fig_region_major = px.bar(
+                        region_major,
+                        x='Region',
+                        y='Count',
+                        color='Count',
+                        color_continuous_scale="Viridis",
+                    )
+                    
+                    st.plotly_chart(fig_region_major, use_container_width=True)
+                    
+                    # Timeline of major events
+                    st.subheader("Timeline of Major Earthquakes")
+                    
+                    fig_timeline = px.scatter(
+                        major_quakes.sort_values('time'),
+                        x='time',
+                        y='mag',
+                        color='region',
+                        size='mag',
+                        hover_name='place',
+                        labels={'time': 'Date', 'mag': 'Magnitude'}
+                    )
+                    
+                    # Add horizontal line at magnitude 8.0
+                    fig_timeline.add_hline(y=8.0, line_dash="dash", line_color="red", annotation_text="M8.0+")
+                    
+                    fig_timeline.update_layout(height=500)
+                    st.plotly_chart(fig_timeline, use_container_width=True)
+                    
+                    # Table of top 10 major events
+                    st.subheader("Top 10 Most Powerful Earthquakes (2005-2025)")
+                    
+                    top10 = major_quakes.nlargest(10, 'mag').reset_index(drop=True)
+                    top10['time'] = top10['time'].dt.strftime('%Y-%m-%d %H:%M:%S')
+                    
+                    # Add a rank column
+                    top10.index = top10.index + 1
+                    top10 = top10.rename_axis('Rank').reset_index()
+                    
+                    # Display the table
+                    st.dataframe(
+                        top10[['Rank', 'time', 'mag', 'place', 'depth']].rename(
+                        columns={'time': 'Date', 'mag': 'Magnitude', 'place': 'Location', 'depth': 'Depth (km)'}
+                        ),
+                        use_container_width=True
+                    )
+                
+                # Tab 5: Recurrence Analysis - Modified to include multiple predictions
+                with hist_tabs[4]:
+                    st.header("Recurrence Analysis and Forecasting")
+                    
+                    st.info("""
+                    This analysis examines historical patterns of earthquake recurrence in different regions
+                    to estimate probabilities of future seismic events. These are statistical estimates based
+                    on historical data, not definitive predictions.
+                    """)
+                    
+                    # Calculate recurrence intervals for regions with significant activity
+                    st.subheader("Recurrence Analysis by Region")
+                    
+                    # Only analyze regions with multiple major events
+                    region_counts = major_quakes['region'].value_counts()
+                    regions_with_multiple = region_counts[region_counts >= 2].index.tolist()
+                    
+                    if not regions_with_multiple:
+                        st.warning("Not enough major earthquakes in any single region for recurrence analysis")
+                    else:
+                        # Calculate recurrence statistics and generate multiple predictions
+                        recurrence_data = []
+                        all_predictions = []  # Store all predictions for display
                         
-                            for region in regions_with_multiple:
-                                region_df = major_quakes[major_quakes['region'] == region].sort_values('time')
+                        # Current time for reference
+                        current_time = pd.Timestamp.now()
+                        if current_time.tz is not None:
+                            current_time = current_time.tz_localize(None)
+                        
+                        for region in regions_with_multiple:
+                            region_df = major_quakes[major_quakes['region'] == region].sort_values('time')
                             
                             # Calculate intervals between events
                             if len(region_df) >= 2:
                                 time_diffs = region_df['time'].diff().dropna()
                                 avg_interval_days = time_diffs.dt.total_seconds().mean() / (24*3600)
                                 avg_interval_years = avg_interval_days / 365.25
-                            
+                                
+                                # Calculate standard deviation for the interval
+                                std_interval_days = time_diffs.dt.total_seconds().std() / (24*3600) if len(time_diffs) > 1 else avg_interval_days * 0.2
+                                
                                 # Last event and estimate of next
                                 last_event = region_df['time'].max()
-                                next_estimate = last_event + pd.Timedelta(days=avg_interval_days)
-                                current_time = pd.Timestamp.now()
-                                if current_time.tz is not None:
-                                    current_time = current_time.tz_localize(None)
                                 if last_event.tz is not None:
                                     last_event = last_event.tz_localize(None)
-                                    time_since_last = (current_time - last_event).total_seconds() / (24*3600*365.25)
-                                else:
-                                    time_since_last = None
-
+                                    
+                                # Calculate time since last event
+                                time_since_last = (current_time - last_event).total_seconds() / (24*3600*365.25)
+                                
+                                # Generate 10 predictions with varying intervals
+                                predictions = []
+                                for i in range(10):
+                                    # Add some randomness to the interval for each prediction
+                                    # Use normal distribution centered around the mean interval
+                                    np.random.seed(i+42)  # Set seed for reproducibility but different for each i
+                                    random_factor = np.random.normal(1.0, 0.3)  # Mean 1.0, std 0.3
+                                    
+                                    # Ensure reasonable factors (between 0.5 and 1.5 of the average)
+                                    random_factor = max(0.5, min(1.5, random_factor))
+                                    
+                                    # Calculate prediction date
+                                    prediction_interval = avg_interval_days * random_factor
+                                    next_date = last_event + pd.Timedelta(days=prediction_interval)
+                                    
+                                    # Calculate magnitude - slight variations around the average magnitude
+                                    avg_mag = region_df['mag'].mean()
+                                    mag_std = region_df['mag'].std() if len(region_df) > 1 else 0.3
+                                    predicted_mag = np.random.normal(avg_mag, mag_std * 0.5)
+                                    predicted_mag = max(6.5, min(9.0, predicted_mag))  # Keep magnitude in reasonable range
+                                    
+                                    # Assign confidence level based on proximity to average interval
+                                    if abs(random_factor - 1.0) < 0.1:
+                                        confidence = "High"
+                                    elif abs(random_factor - 1.0) < 0.25:
+                                        confidence = "Medium"
+                                    else:
+                                        confidence = "Low"
+                                        
+                                    # Generate "time of day" for prediction (random but weighted toward typical patterns)
+                                    # Using exactly summing probabilities
+                                    hour_probs = np.array([0.04, 0.04, 0.04, 0.04, 0.04, 0.05, 
+                                                         0.05, 0.05, 0.04, 0.04, 0.04, 0.04,
+                                                         0.04, 0.04, 0.04, 0.04, 0.04, 0.05,
+                                                         0.05, 0.05, 0.04, 0.04, 0.04, 0.04])
+                                    # Normalize to ensure sum is exactly 1.0
+                                    hour_probs = hour_probs / hour_probs.sum()
+                                    hour = np.random.choice(range(24), p=hour_probs)
+                                    minute = np.random.randint(0, 60)
+                                    second = np.random.randint(0, 60)
+                                    
+                                    # Set time components
+                                    next_date = next_date.replace(hour=hour, minute=minute, second=second)
+                                    
+                                    # Store prediction
+                                    predictions.append({
+                                        "region": region,
+                                        "predicted_date": next_date,
+                                        "predicted_magnitude": predicted_mag,
+                                        "confidence": confidence,
+                                        "days_from_now": (next_date - current_time).days,
+                                        "interval_used": prediction_interval / 365.25,  # in years
+                                        "time_since_last": time_since_last
+                                    })
+                                    
+                                # Add all predictions to the master list
+                                all_predictions.extend(predictions)
+                                
                                 # Calculate probability using Poisson distribution
                                 lambda_param = 1 / avg_interval_years
                                 prob_1yr = 1 - np.exp(-lambda_param * 1)
                                 prob_5yr = 1 - np.exp(-lambda_param * 5)
-                            
+                                
+                                # Store main recurrence statistics
                                 recurrence_data.append({
-                                'Region': region,
-                                'Events': len(region_df),
-                                'Avg Interval (years)': avg_interval_years,
-                                'Last Event': last_event,
-                                'Time Since Last (years)': time_since_last,
-                                'Next Estimate': next_estimate,
-                                'Probability (1 year)': prob_1yr,
-                                'Probability (5 years)': prob_5yr
+                                    'Region': region,
+                                    'Events': len(region_df),
+                                    'Avg Interval (years)': avg_interval_years,
+                                    'Last Event': last_event,
+                                    'Time Since Last (years)': time_since_last,
+                                    'Next Estimate': last_event + pd.Timedelta(days=avg_interval_days),
+                                    'Probability (1 year)': prob_1yr,
+                                    'Probability (5 years)': prob_5yr
                                 })
                         
-                            recurrence_df = pd.DataFrame(recurrence_data)
+                        # Convert to DataFrames
+                        recurrence_df = pd.DataFrame(recurrence_data)
+                        predictions_df = pd.DataFrame(all_predictions)
                         
-                            # Format for display
-                            display_df = recurrence_df.copy()
-                            display_df['Last Event'] = display_df['Last Event'].dt.strftime('%Y-%m-%d')
-                            display_df['Next Estimate'] = display_df['Next Estimate'].dt.strftime('%Y-%m-%d')
-                            display_df['Avg Interval (years)'] = display_df['Avg Interval (years)'].round(2)
-                            display_df['Time Since Last (years)'] = display_df['Time Since Last (years)'].round(2)
-                            display_df['Probability (1 year)'] = (display_df['Probability (1 year)'] * 100).round(2).astype(str) + '%'
-                            display_df['Probability (5 years)'] = (display_df['Probability (5 years)'] * 100).round(2).astype(str) + '%'
-
+                        # Format predictions for display
+                        display_predictions = predictions_df.copy()
+                        display_predictions['predicted_date'] = display_predictions['predicted_date'].dt.strftime('%Y-%m-%d %H:%M:%S')
+                        display_predictions['predicted_magnitude'] = display_predictions['predicted_magnitude'].round(2)
+                        display_predictions['interval_used'] = display_predictions['interval_used'].round(2)
+                        display_predictions['time_since_last'] = display_predictions['time_since_last'].round(2)
+                        
+                        # Display the predictions table
+                        st.subheader("Future Earthquake Predictions (Next 10 Major Events)")
+                        st.dataframe(
+                            display_predictions[['region', 'predicted_date', 'predicted_magnitude', 'confidence', 'days_from_now']].rename(
+                                columns={
+                                    'region': 'Region',
+                                    'predicted_date': 'Predicted Date',
+                                    'predicted_magnitude': 'Magnitude',
+                                    'confidence': 'Confidence',
+                                    'days_from_now': 'Days From Now'
+                                }
+                            ),
+                            use_container_width=True
+                        )
+                        
+                        # Show a plot of predictions by region over time
+                        st.subheader("Timeline of Predicted Major Earthquakes")
+                        
+                        # Sort predictions by date
+                        sorted_predictions = predictions_df.sort_values('predicted_date')
+                        
+                        # Create a timeline of predictions
+                        fig_pred_timeline = px.scatter(
+                            sorted_predictions,
+                            x='predicted_date',
+                            y='predicted_magnitude',
+                            color='region',
+                            size='predicted_magnitude',
+                            symbol='confidence',
+                            symbol_map={'High': 'circle', 'Medium': 'square', 'Low': 'diamond'},
+                            hover_name='region',
+                            hover_data={
+                                'predicted_date': True,
+                                'predicted_magnitude': ':.2f',
+                                'confidence': True,
+                                'days_from_now': True
+                            },
+                            labels={
+                                'predicted_date': 'Predicted Date',
+                                'predicted_magnitude': 'Predicted Magnitude',
+                                'region': 'Region',
+                                'confidence': 'Confidence'
+                            },
+                            title="Timeline of Predicted Major Earthquakes"
+                        )
+                        
+                        fig_pred_timeline.update_layout(height=600)
+                        st.plotly_chart(fig_pred_timeline, use_container_width=True)
+                        
                         # Create a bar chart for probability (5 years)
                         fig_prob = px.bar(
                             recurrence_df,
@@ -3560,9 +4142,9 @@ if df is not None and not df.empty:
                         )
                         fig_prob.update_traces(textposition='outside')
                         st.plotly_chart(fig_prob, use_container_width=True)
-                    
-                        # Create an interactive forecast map
-                        st.subheader("Interactive Forecast Map")
+                        
+                        # Create an interactive forecast map showing all predictions
+                        st.subheader("Interactive Earthquake Forecast Map")
                         
                         m = folium.Map(
                             location=[20, 0],
@@ -3570,41 +4152,50 @@ if df is not None and not df.empty:
                             tiles='CartoDB dark_matter'
                         )
                         
-                        # Add circle markers for each region
-                        for _, row in recurrence_df.iterrows():
-                            # Get centroid coordinates for each region by filtering the data
-                            region_data = data_historic[data_historic['region'] == row['Region']]
-                            lat = region_data['latitude'].mean()
-                            lon = region_data['longitude'].mean()
+                        # Get coordinates for each region
+                        region_coords = {}
+                        for region in regions_with_multiple:
+                            region_data = data_historic[data_historic['region'] == region]
+                            region_coords[region] = {
+                                'lat': region_data['latitude'].mean(),
+                                'lon': region_data['longitude'].mean()
+                            }
+                        
+                        # Add markers for each prediction
+                        for i, pred in predictions_df.iterrows():
+                            region = pred['region']
+                            coords = region_coords.get(region, {'lat': 0, 'lon': 0})
                             
-                            # Determine color and size based on probability
-                            prob = row['Probability (5 years)']
-                            if prob > 0.75:
+                            # Add small random offset to prevent complete overlap
+                            lat_offset = np.random.uniform(-1, 1)
+                            lon_offset = np.random.uniform(-1, 1)
+                            
+                            lat = coords['lat'] + lat_offset
+                            lon = coords['lon'] + lon_offset
+                            
+                            # Determine color based on confidence
+                            if pred['confidence'] == 'High':
                                 color = 'red'
-                                radius = 300000  # in meters
-                            elif prob > 0.5:
-                                color = 'orange'
                                 radius = 250000
-                            elif prob > 0.25:
-                                color = 'yellow'
+                            elif pred['confidence'] == 'Medium':
+                                color = 'orange'
                                 radius = 200000
                             else:
-                                color = 'green'
+                                color = 'yellow'
                                 radius = 150000
                             
                             # Format popup content
                             popup_content = f"""
-                            <div style='width:200px'>
-                                <h4>{row['Region']}</h4>
+                            <div style='width:220px'>
+                                <h4>{region}</h4>
                                 <hr>
-                                <b>Major Events:</b> {row['Events']}<br>
-                                <b>Average Interval:</b> {row['Avg Interval (years)']:.2f} years<br>
-                                <b>Last Event:</b> {row['Last Event'].strftime('%Y-%m-%d')}<br>
-                                <b>Time Since Last:</b> {row['Time Since Last (years)']:.2f} years<br>
+                                <b>Predicted Date:</b> {pred['predicted_date'].strftime('%Y-%m-%d %H:%M:%S')}<br>
+                                <b>Magnitude:</b> {pred['predicted_magnitude']:.2f}<br>
+                                <b>Confidence:</b> {pred['confidence']}<br>
+                                <b>Days from now:</b> {pred['days_from_now']}<br>
                                 <hr>
-                                <b>Probability (1yr):</b> {row['Probability (1 year)']*100:.1f}%<br>
-                                <b>Probability (5yr):</b> {row['Probability (5 years)']*100:.1f}%<br>
-                                <b>Next Estimated:</b> {row['Next Estimate'].strftime('%Y-%m-%d')}
+                                <b>Based on interval:</b> {pred['interval_used']:.2f} years<br>
+                                <b>Time since last:</b> {pred['time_since_last']:.2f} years<br>
                             </div>
                             """
                             
@@ -3628,29 +4219,47 @@ if df is not None and not df.empty:
                             color: white;
                             padding: 10px;
                             border-radius: 5px;">
-                        <p><b>Probability of M7.0+ in Next 5 Years</b></p>
-                        <p><i class="fa fa-circle" style="color:red"></i> Very High (>75%)</p>
-                        <p><i class="fa fa-circle" style="color:orange"></i> High (50-75%)</p>
-                        <p><i class="fa fa-circle" style="color:yellow"></i> Moderate (25-50%)</p>
-                        <p><i class="fa fa-circle" style="color:green"></i> Low (<25%)</p>
+                        <p><b>Earthquake Prediction Confidence</b></p>
+                        <p><i class="fa fa-circle" style="color:red"></i> High Confidence</p>
+                        <p><i class="fa fa-circle" style="color:orange"></i> Medium Confidence</p>
+                        <p><i class="fa fa-circle" style="color:yellow"></i> Low Confidence</p>
                         </div>
                         """
-                    
+                        
                         m.get_root().html.add_child(folium.Element(legend_html))
-                    
+                        
                         # Display the map
                         folium_static(m, width=1000, height=600)
-                    
+                        
+                        # Display detailed prediction table
+                        st.subheader("Detailed Prediction Data")
+                        
+                        # Show all prediction details in an expanded view
+                        detailed_pred = display_predictions[['region', 'predicted_date', 'predicted_magnitude', 
+                                                        'confidence', 'days_from_now', 'interval_used', 
+                                                        'time_since_last']].rename(
+                            columns={
+                                'region': 'Region',
+                                'predicted_date': 'Predicted Date & Time',
+                                'predicted_magnitude': 'Magnitude',
+                                'confidence': 'Confidence',
+                                'days_from_now': 'Days From Now',
+                                'interval_used': 'Interval Used (years)',
+                                'time_since_last': 'Time Since Last (years)'
+                            }
+                        )
+                        
+                        st.dataframe(detailed_pred, use_container_width=True)
+                        
                         # Disclaimer
                         st.warning("""
                         ⚠️ **Disclaimer:** These predictions are based solely on statistical analysis of historical data.
                         Earthquake forecasting has inherent limitations and uncertainties. This information should be used
                         for educational purposes only and not for making critical safety decisions.
                         """)
-                    
-                else:
-                    st.error("Failed to load historical earthquake data. Please check the file path and format.")
-
+                
+            else:
+                st.error("Failed to load historical earthquake data. Please check the file path and format.")
 
 
 # --- Sidebar About Section ---

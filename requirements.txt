@@ -1,7 +1,26 @@
-numpy
-pandas
-matplotlib
-seaborn
-folium
-geopandas
-plotly
+# Dependencies for the earthquake analysis project
+
+# Data manipulation libraries
+pandas==2.0.3
+numpy==1.24.4
+
+# Visualization libraries
+plotly==5.16.1
+folium==0.14.0
+streamlit-folium==0.11.0
+matplotlib==3.7.2
+seaborn==0.12.2
+
+# Machine learning libraries
+scikit-learn==1.3.0
+scipy==1.11.2
+
+# Datetime and parsing
+python-dateutil==2.8.2
+
+# Web communication libraries
+tornado==6.3.2
+websocket-client==1.6.1
+
+# Streamlit for the dashboard
+streamlit==1.25.0
