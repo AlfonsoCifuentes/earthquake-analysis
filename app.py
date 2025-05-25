@@ -2979,8 +2979,12 @@ if df is not None and not df.empty:
                                 height=250  # Fixed height to avoid excessive scrolling
                             )
                         else:
-                            # Changed to success (green background) as requested
-                            st.success("✓ No significant USGS alerts in the last 24 hours")
+                            # Usar HTML directo con las clases CSS que ya existen en tu aplicación
+                            st.markdown("""
+                            <div class="stAlert stAlertSuccess" style="background-color: #2ecc40 !important; color: #fff !important; border-left: 0.5rem solid #27ae60 !important;">
+                                <div data-testid="stMarkdownContainer">✓ No significant USGS alerts in the last 24 hours</div>
+                            </div>
+                            """, unsafe_allow_html=True)
                     except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
                         st.warning(f"Could not connect to USGS API: {e}. Check your internet connection.")
                         # Provide fallback information
@@ -3326,8 +3330,12 @@ if df is not None and not df.empty:
             if "ws_client" not in st.session_state:
                 st.session_state.ws_client = EMSCWebSocketClient()
                 st.session_state.ws_client.start()
-                # Changed to success (green background) as requested
-                emsc_ws_status.success("✓ Connected to EMSC real-time feed")
+                # Usar HTML directo con las clases CSS que ya existen en tu aplicación
+                emsc_ws_status.markdown("""
+                <div class="stAlert stAlertSuccess" style="background-color: #2ecc40 !important; color: #fff !important; border-left: 0.5rem solid #27ae60 !important;">
+                    <div data-testid="stMarkdownContainer">✓ Connected to EMSC real-time feed</div>
+                </div>
+                """, unsafe_allow_html=True)
             
             # Get filtered events from session_state
             filtered_events = [
@@ -3362,8 +3370,12 @@ if df is not None and not df.empty:
                             height=400  # Fixed height to prevent excessive scrolling
                         )
             else:
-                # Changed to warning (yellow background) as requested
-                st.warning("Waiting for earthquakes meeting the magnitude threshold...")
+                # Usar HTML directo con las clases CSS que ya existen en tu aplicación para color amarillo
+                st.markdown("""
+                <div class="stAlert stAlertWarning" style="background-color: #ffe066 !important; color: #333 !important; border-left: 0.5rem solid #ffb347 !important;">
+                    <div data-testid="stMarkdownContainer">Waiting for earthquakes meeting the magnitude threshold...</div>
+                </div>
+                """, unsafe_allow_html=True)
 
             # -------------------------------------------------
             # Alert System Information
